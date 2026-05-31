@@ -10,6 +10,7 @@
 [![CodeFactor][codefactor-badge]][codefactor-url]
 ![Tests][test-url]
 [![OpenSSF Best Practices][ossf-badge]][ossf-url]
+[![Miri][miri-badge]][miri-url]
 [![codecov][codecov-badge]][codecov-url]
 
 [codefactor-badge]: https://www.codefactor.io/repository/github/deepcausality-rs/deep_causality/badge
@@ -38,6 +39,9 @@
 
 [test-url]: https://github.com/deepcausality-rs/deep_causality/actions/workflows/run_tests.yml/badge.svg
 
+[miri-badge]: https://github.com/deepcausality-rs/deep_causality/actions/workflows/rust_miri.yml/badge.svg
+
+[miri-url]: https://github.com/deepcausality-rs/deep_causality/actions/workflows/rust_miri.yml
 
 ---
 
@@ -150,7 +154,7 @@ See [examples/README.md](examples/README.md) for the full catalogue of available
 
 ## Architecture
 
-The EPP rests on a single axiom: **`m₂ = m₁ >>= f`**. Causality becomes a monadic dependency, with no
+The EPP rests on a single axiom: **`m₂ = m₁ >>= f`**. Effect propagation becomes a monadic dependency, with no
 assumption of any background spacetime. Three computable primitives operationalize the axiom, and an optional fourth
 provides the safety layer for emergent behaviour.
 

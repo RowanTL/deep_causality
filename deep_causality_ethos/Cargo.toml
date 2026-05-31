@@ -3,7 +3,7 @@
 
 [package]
 name = "deep_causality_ethos"
-version = "0.2.5"
+version = "0.2.6"
 edition = { workspace = true }
 rust-version = { workspace = true }
 license = { workspace = true }
@@ -43,3 +43,6 @@ version = "0.13"
 path = "../ultragraph"
 version = "0.9"
 
+
+[lints]
+workspace = true

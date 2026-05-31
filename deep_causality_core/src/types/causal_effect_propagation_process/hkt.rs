@@ -6,7 +6,7 @@
 use crate::{CausalEffectPropagationProcess, EffectValue};
 use core::marker::PhantomData;
 use deep_causality_haft::{
-    Applicative, Functor, HKT, HKT5, LogAppend, Monad, NoConstraint, Placeholder, Pure, Satisfies,
+    Applicative, Functor, HKT, HKT5, LogAppend, NoConstraint, Placeholder, Pure, Satisfies,
 };
 
 pub struct CausalEffectPropagationProcessWitness<S, C, E, L>(
@@ -28,18 +28,14 @@ impl<S, C, E, L> HKT for CausalEffectPropagationProcessWitness<S, C, E, L> {
     type Type<Value> = CausalEffectPropagationProcess<Value, S, C, E, L>;
 }
 
-impl<S, C, E, L> Functor<CausalEffectPropagationProcessWitness<S, C, E, L>>
-    for CausalEffectPropagationProcessWitness<S, C, E, L>
+impl<S, C, E, L> Functor<Self> for CausalEffectPropagationProcessWitness<S, C, E, L>
 where
     S: Clone,
     C: Clone,
     E: Clone,
     L: Clone,
 {
-    fn fmap<A, B, Func>(
-        m_a: <CausalEffectPropagationProcessWitness<S, C, E, L> as HKT>::Type<A>,
-        f: Func,
-    ) -> <CausalEffectPropagationProcessWitness<S, C, E, L> as HKT>::Type<B>
+    fn fmap<A, B, Func>(m_a: <Self as HKT>::Type<A>, f: Func) -> <Self as HKT>::Type<B>
     where
         A: Satisfies<<Self as HKT>::Constraint>,
         B: Satisfies<<Self as HKT>::Constraint>,
@@ -58,8 +54,7 @@ where
     }
 }
 
-impl<S, C, E, L> Pure<CausalEffectPropagationProcessWitness<S, C, E, L>>
-    for CausalEffectPropagationProcessWitness<S, C, E, L>
+impl<S, C, E, L> Pure<Self> for CausalEffectPropagationProcessWitness<S, C, E, L>
 where
     S: Clone + Default,
     C: Clone,
@@ -80,8 +75,7 @@ where
     }
 }
 
-impl<S, C, E, L> Applicative<CausalEffectPropagationProcessWitness<S, C, E, L>>
-    for CausalEffectPropagationProcessWitness<S, C, E, L>
+impl<S, C, E, L> Applicative<Self> for CausalEffectPropagationProcessWitness<S, C, E, L>
 where
     S: Clone + Default,
     C: Clone,
@@ -116,43 +110,7 @@ where
     }
 }
 
-impl<S, C, E, L> Monad<CausalEffectPropagationProcessWitness<S, C, E, L>>
-    for CausalEffectPropagationProcessWitness<S, C, E, L>
-where
-    S: Clone + Default,
-    C: Clone,
-    E: Clone,
-    L: LogAppend + Clone + Default,
-{
-    fn bind<A, B, Func>(m_a: <Self as HKT>::Type<A>, mut f: Func) -> <Self as HKT>::Type<B>
-    where
-        A: Satisfies<<Self as HKT>::Constraint>,
-        B: Satisfies<<Self as HKT>::Constraint>,
-        Func: FnMut(A) -> <Self as HKT>::Type<B>,
-    {
-        if let Some(error) = m_a.error {
-            return CausalEffectPropagationProcess {
-                value: EffectValue::None, // No B can be produced
-                state: m_a.state,
-                context: m_a.context,
-                error: Some(error),
-                logs: m_a.logs,
-            };
-        }
-
-        let a = m_a.value.into_value().expect("Value expected in bind");
-
-        let mut next_effect = f(a);
-
-        let mut combined_logs = m_a.logs;
-        combined_logs.append(&mut next_effect.logs);
-
-        CausalEffectPropagationProcess {
-            value: next_effect.value,
-            state: m_a.state,     // State is passed through, not updated by f
-            context: m_a.context, // Context is passed through
-            error: next_effect.error,
-            logs: combined_logs,
-        }
-    }
-}
+// NOTE: `CausalEffectPropagationProcessWitness` deliberately does NOT implement the value-only
+// `Monad` trait. Its `bind` continuation (`FnMut(A) -> M<B>`) cannot thread the Markovian `State`
+// channel, so it could only freeze state. The correct, state-threading bind is the `CausalMonad`
+// trait (and the inherent `bind` method on `CausalEffectPropagationProcess`).
