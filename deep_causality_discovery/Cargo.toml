@@ -1,6 +1,6 @@
 [package]
 name = "deep_causality_discovery"
-version = "0.3.7"
+version = "0.4.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -19,7 +19,7 @@ exclude = ["*.bazel", "*/*.bazel",  "*.bazel.*", "BUILD", "BUILD.bazel", "MODULE
 
 [dependencies.deep_causality_algorithms]
 path = "../deep_causality_algorithms"
-version = "0.2"
+version = "0.3"
 
 [dependencies.deep_causality_num]
 path = "../deep_causality_num"
@@ -35,10 +35,15 @@ path = "../deep_causality_tensor"
 version = "0.4"
 
 
+[dependencies.deep_causality_topology]
+path = "../deep_causality_topology"
+version = "0.6"
+
+
 # External dependencies
 [dependencies]
 csv = {version = "1.4", default-features = false}
-parquet = {version = "58", default-features = false}
+parquet = {version = "59", default-features = false}
 
 
 [dev-dependencies]

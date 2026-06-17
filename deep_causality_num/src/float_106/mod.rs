@@ -33,14 +33,15 @@
 //! | **DoubleFloat** | **~32 digits** | **10⁻³¹ (quecto)** — Near Planck length |
 //! | f128 | ~34 digits | 10⁻³⁴ — Planck length (10⁻³⁵) |
 mod attributes;
+mod constants;
 mod debug;
 mod display;
+mod erf;
 mod from;
 mod getters;
 mod ops_arithmetic;
 mod ops_comparison;
 mod traits_algebra;
-mod traits_float;
 mod traits_num;
 
 /// A high-precision 106bit floating point number represented as the sum of two `f64`s.

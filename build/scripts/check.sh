@@ -17,6 +17,8 @@ cargo outdated --workspace
 cargo machete deep_causality/
 cargo machete deep_causality_algorithms/
 cargo machete deep_causality_ast/
+cargo machete deep_causality_calculus/
+cargo machete deep_causality_cfd/
 cargo machete deep_causality_core/
 cargo machete deep_causality_data_structures/
 cargo machete deep_causality_discovery/

@@ -112,6 +112,14 @@ Understand the surrounding code before editing it.
 - Do not infer architecture from one file when other relevant files are available.
 - If context is missing, say so.
 
+Understand the existing layers of abstraction:
+
+- Identify the various levels of abstraction in the affected codebase.
+- Expand the search of the codebase to understand the various levels of abstraction already in place.
+- Ensure that new code lands at the right level of abstraction in the existing code base.
+- If you find inconsistencies of abstraction, flag them. Stop and say so.
+- If you cannot determine where to put new code in the abstraction hierarchy, flag, stop and say so.
+
 Do not patch blindly.
 
 ### 7. Preserve Intent
@@ -168,7 +176,7 @@ It uses three main components:
 
 ## Project Structure
 
-The project is a monorepo containing 19 library crates:
+The project is a monorepo containing 20 library crates:
 
 ### Core Crates
 * `deep_causality`: Computational causality library. Provides causality graph, collections, context and causal reasoning.
@@ -179,8 +187,6 @@ The project is a monorepo containing 19 library crates:
 
 ### Data Structure Crates
 * `deep_causality_data_structures`: Data structures for deep_causality (sliding-window, grid-array).
-* `deep_causality_tensor`: Tensor data structure for deep_causality.
-* `deep_causality_sparse`: Sparse matrix data structure (CSR format) for deep_causality.
 * `ultragraph`: Hypergraph data structure used as a backend in deep_causality.
 
 ### Algorithm and Discovery Crates
@@ -188,8 +194,11 @@ The project is a monorepo containing 19 library crates:
 * `deep_causality_discovery`: Causality discovery DSL for the DeepCausality project.
 
 ### Math and Numerics Crates
+* `deep_causality_calculus`: "Arrow-native differentiation and integration operators.
 * `deep_causality_num`: Numerical traits and utils used across all crates.
 * `deep_causality_rand`: Random number generator and statistical distributions.
+* `deep_causality_sparse`: Sparse matrix data structure (CSR format) for deep_causality.
+* `deep_causality_tensor`: Tensors 
 * `deep_causality_multivector`: Multivector implementation for geometric algebra.
 * `deep_causality_uncertain`: A first-order type for uncertain programming.
 
@@ -200,6 +209,86 @@ The project is a monorepo containing 19 library crates:
 ### Topology and Physics Crates
 * `deep_causality_topology`: Topological data structures (complexes, manifolds, differential geometry).
 * `deep_causality_physics`: Standard library of physics formulas and engineering primitives.
+
+## Project Dependencies
+
+Scope: the 20 library crates that are workspace members. Example crates (`examples/*`),
+vendored third-party crates (`thirdparty/crates/*`), and `yanked/*` are excluded.
+`deep_causality_effects` exists on disk but is **not** a workspace member, so it is omitted.
+`deep_causality_macros` is a member but deprecated and has no dependents.
+
+### Internal Dependencies
+
+Crates are arranged in dependency tiers: a crate depends only on crates in lower tiers.
+`→` lists the direct internal (path) dependencies. `(opt)` marks an optional, feature-gated
+dependency. Dev/test/bench-only dependencies are shown separately below.
+
+```
+Tier 0 — Foundational (no internal runtime dependencies)
+  deep_causality_ast
+  deep_causality_haft
+  deep_causality_metric
+  deep_causality_num
+  deep_causality_data_structures
+  ultragraph
+
+Tier 1
+  deep_causality_core        → deep_causality_haft
+  deep_causality_calculus    → deep_causality_haft, deep_causality_num
+  deep_causality_rand        → deep_causality_num
+  deep_causality_tensor      → deep_causality_ast, deep_causality_haft, deep_causality_num
+
+Tier 2
+  deep_causality_sparse      → deep_causality_num, deep_causality_haft, deep_causality_tensor (opt)
+  deep_causality_multivector → deep_causality_haft, deep_causality_num, deep_causality_tensor,
+                               deep_causality_metric
+  deep_causality_uncertain   → deep_causality_ast, deep_causality_num, deep_causality_rand
+
+Tier 3
+  deep_causality_topology    → deep_causality_num, deep_causality_haft, deep_causality_metric,
+                               deep_causality_tensor, deep_causality_multivector,
+                               deep_causality_sparse, deep_causality_rand
+  deep_causality             → deep_causality_ast, deep_causality_core,
+                               deep_causality_data_structures, deep_causality_haft,
+                               deep_causality_uncertain, ultragraph
+
+Tier 4
+  deep_causality_algorithms  → deep_causality_num, deep_causality_rand,
+                               deep_causality_tensor, deep_causality_topology
+  deep_causality_physics     → deep_causality_calculus, deep_causality_core,
+                               deep_causality_haft, deep_causality_metric,
+                               deep_causality_multivector, deep_causality_num,
+                               deep_causality_sparse, deep_causality_tensor,
+                               deep_causality_topology, deep_causality_rand (opt)
+  deep_causality_ethos       → deep_causality, ultragraph
+
+Tier 5
+  deep_causality_discovery   → deep_causality_algorithms, deep_causality_haft,
+                               deep_causality_num, deep_causality_tensor
+```
+
+Internal dev-only dependency (tests/benches, not part of any published runtime):
+* `deep_causality_rand` is a dev-dependency of `deep_causality_data_structures`,
+  `deep_causality_sparse`, `deep_causality_tensor`, and `ultragraph`.
+
+### External Dependencies
+
+Only crates with at least one external (crates.io) runtime dependency are listed.
+The other 16 library crates have no external runtime dependencies.
+
+| Crate | External dependency | Status |
+|-------|---------------------|--------|
+| `deep_causality_num` | `libm` | optional — `libm_math` / `no-std` feature |
+| `deep_causality_rand` | `getrandom`, `chacha20poly1305`, `zeroize` | all optional — `aead-random` / `os-random` features |
+| `deep_causality_algorithms` | `rayon` | optional — `parallel` feature |
+| `deep_causality_discovery` | `csv`, `parquet` | required (runtime) |
+
+External dev-only dependencies (tests/benches, not part of any published runtime):
+* `criterion` — benchmarks in `deep_causality`, `deep_causality_algorithms`,
+  `deep_causality_data_structures`, `deep_causality_multivector`, `deep_causality_sparse`,
+  `deep_causality_tensor`, `deep_causality_uncertain`, `ultragraph`.
+* `tempfile` — `deep_causality_discovery` tests.
+* `rusty-fork` — `deep_causality_uncertain` tests.
 
 
 ## Building and Running
@@ -240,6 +329,8 @@ To rebuild and test the entire repo
 
 You aim for one hundred percent test coverage of all added or edited code files.
 The only exception is if, for some reason, some code is impossible to reach. Then you skip testing that dead code.
+
+Code examples under `examples/*` are exempt from the coverage requirement. They are runnable demonstrations, not library code, and are verified by running them (`cargo run -p <crate> --example <name>`) rather than by unit tests. Do not add test files or test modules for example binaries.
 
 If tests find any bug, you fix the implementation so that the test pass. Because the testing exists to ensure that the API is correct, and if the API is not correct, you fix the API so that the test is passing.
 
@@ -352,47 +443,3 @@ Safety and security style:
   Do not add a new exemption without a documented, irreducible justification; prefer a safe redesign (e.g. a structure-preserving map, `AtomicU64` over `static mut`).
 * Avoid macros in all lib code i.e. everything under /src. However, macros for testing are permissible when using sparingly i.e. for bulk testing many types implementing the same trait. 
 * Avoid the introduction of external crates unless it is necessary for testing.
-
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **deep_causality** (662687 symbols, 853222 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/deep_causality/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/deep_causality/clusters` | All functional areas |
-| `gitnexus://repo/deep_causality/processes` | All execution flows |
-| `gitnexus://repo/deep_causality/process/{name}` | Step-by-step execution trace |
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
