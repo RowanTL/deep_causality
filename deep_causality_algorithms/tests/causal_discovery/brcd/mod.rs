@@ -4,7 +4,9 @@
  */
 #[cfg(test)]
 mod augment_tests;
+// Disabled under Miri
 #[cfg(test)]
+#[cfg(not(miri))]
 mod boss_bootstrap_tests;
 #[cfg(test)]
 mod boss_config_tests;
@@ -29,14 +31,20 @@ mod error_tests;
 #[cfg(test)]
 mod family_tests;
 #[cfg(test)]
+#[cfg(not(miri))]
 mod gate_tests;
 #[cfg(test)]
 mod gaussian_tests;
 #[cfg(test)]
+#[cfg(not(miri))]
+mod mapconfig_tests;
+#[cfg(test)]
+#[cfg(not(miri))]
 mod mec_tests;
 #[cfg(test)]
 mod meek_tests;
 #[cfg(test)]
+#[cfg(not(miri))]
 mod update_tests;
 #[cfg(test)]
 mod validity_tests;
