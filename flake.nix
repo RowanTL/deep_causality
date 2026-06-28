@@ -31,6 +31,13 @@
             openssl
             pkg-config
             jetbrains.rust-rover
+            curl
+
+            # cargo programs
+            cargo-nextest
+            cargo-outdated
+            cargo-udeps
+            cargo-audit
           ];
 
           shellHook = ''
