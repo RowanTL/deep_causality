@@ -38,6 +38,7 @@
             cargo-outdated
             cargo-udeps
             cargo-audit
+            cargo-machete
           ];
 
           shellHook = ''
