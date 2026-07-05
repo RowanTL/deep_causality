@@ -33,7 +33,7 @@
             pkg-config
             jetbrains.rust-rover
             curl
-            lean-all
+            lean.lean-all
 
             # cargo programs
             cargo-nextest
