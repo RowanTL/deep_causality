@@ -5,12 +5,13 @@
     nixpkgs.url      = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url  = "github:numtide/flake-utils";
+    lean4-nix.url = "github:lenianiva/lean4-nix";
   };
 
-  outputs = {nixpkgs, rust-overlay, flake-utils, ... }:
+  outputs = {nixpkgs, rust-overlay, flake-utils, lean4-nix, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        overlays = [ (import rust-overlay) ];
+        overlays = [ (import rust-overlay) (lean4-nix.readToolchainFile ./lean/lean-toolchain) ];
         pkgs = import nixpkgs {
           inherit system overlays;
           config.allowUnfree = true;
@@ -32,6 +33,7 @@
             pkg-config
             jetbrains.rust-rover
             curl
+            lean-all
 
             # cargo programs
             cargo-nextest
