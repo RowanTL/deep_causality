@@ -5,7 +5,7 @@
 
 use super::CausalEffectPropagationProcess;
 use crate::AlternatableValue;
-use crate::EffectValue;
+use crate::CausalEffect;
 use alloc::format;
 use core::fmt::Debug;
 use deep_causality_haft::{LogAddEntry, LogAppend};
@@ -18,17 +18,17 @@ where
 {
     fn alternate_value(mut self, new_value: Value) -> Self {
         // If there is already an error, propagate it and apply nothing.
-        if self.error.is_some() {
+        let Ok(old_value) = &self.outcome else {
             return self;
-        }
+        };
 
-        let new_value = EffectValue::from(new_value);
+        let new_value = CausalEffect::value(new_value);
 
         self.logs.add_entry(&format!(
             "!!ValueAlternation!!: {:?} replaced with {:?}",
-            self.value, new_value
+            old_value, new_value
         ));
-        self.value = new_value;
+        self.outcome = Ok(new_value);
         self
     }
 }

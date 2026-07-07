@@ -6,7 +6,6 @@
 pub mod stateful;
 
 use crate::*;
-use deep_causality_haft::LogAppend;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use ultragraph::GraphTraversal;
@@ -72,10 +71,9 @@ where
     ///
     /// ## Adaptive Reasoning
     ///
-    /// If a `Causaloid` returns a `PropagatingEffect::RelayTo(target_index, inner_effect)`,
-    /// the BFS traversal dynamically jumps to  `target_index`, and `inner_effect` becomes
-    /// the new input for the relayed path. This enables *adaptive reasoning* conditional to the deciding
-    /// causaloid.
+    /// If a `Causaloid` returns a `RelayTo` command effect, the BFS traversal dynamically jumps to
+    /// its `target` index, and the command's sub-program becomes the new input for the relayed path.
+    /// This enables *adaptive reasoning* conditional to the deciding causaloid.
     ///
     /// # Arguments
     ///
@@ -138,40 +136,59 @@ where
                 return result_effect;
             }
 
-            match &result_effect.value {
-                // Adaptive reasoning:
-                EffectValue::RelayTo(target_index, inner_effect) => {
+            // Interpret the causaloid's output effect (the `Free::fold` handler, inlined for the
+            // single `RelayTo` command): a command jumps; a value/none follows the graph edges.
+            match result_effect.command_target() {
+                // Adaptive reasoning: `RelayTo(target, sub)`.
+                Some(target_idx) => {
                     // Reset traversal state to follow the relayed path exclusively.
                     visited.fill(false);
                     queue.clear();
 
-                    let target_idx = *target_index;
-
                     if !self.contains_causaloid(target_idx) {
-                        let mut err_effect = last_propagated_effect.clone();
-
-                        err_effect.error = Some(CausalityError(CausalityErrorEnum::Custom(
-                            format!(
+                        // Raising discards the value channel: value and error are one channel.
+                        let (_, state, context, logs) = last_propagated_effect.into_parts();
+                        return PropagatingEffect::new(
+                            Err(CausalityError(CausalityErrorEnum::Custom(format!(
                                 "RelayTo target causaloid with index {target_idx} not found in graph."
-                            ),
-                        )));
-                        return err_effect;
+                            )))),
+                            state,
+                            context,
+                            logs,
+                        );
                     }
 
                     visited[target_idx] = true;
 
-                    let mut relayed = *inner_effect.clone();
-                    relayed.logs.append(&mut last_propagated_effect.logs);
+                    // The relayed input is the command's sub-program folded to its value; the target
+                    // receives it wrapped with the relaying node's state/context/logs.
+                    let sub_value = result_effect
+                        .into_parts()
+                        .0
+                        .ok()
+                        .and_then(CausalEffect::into_command)
+                        .and_then(|(_, sub)| sub.into_value());
+                    // The stateless engine's carrier has unit state and no context.
+                    let relayed = PropagatingEffect::new(
+                        Ok(CausalEffect::from_option(sub_value)),
+                        (),
+                        None,
+                        last_propagated_effect.logs().clone(),
+                    );
                     queue.push_back((target_idx, relayed));
                 }
-                _ => {
+                None => {
                     let children = match self.get_graph().outbound_edges(current_index) {
                         Ok(c) => c,
                         Err(e) => {
-                            let mut err_effect = last_propagated_effect.clone();
-                            err_effect.error =
-                                Some(CausalityError(CausalityErrorEnum::Custom(format!("{e}"))));
-                            return err_effect;
+                            // Raising discards the value channel: value and error are one channel.
+                            let (_, state, context, logs) = last_propagated_effect.into_parts();
+                            return PropagatingEffect::new(
+                                Err(CausalityError(CausalityErrorEnum::Custom(format!("{e}")))),
+                                state,
+                                context,
+                                logs,
+                            );
                         }
                     };
                     for child_index in children {
@@ -263,8 +280,8 @@ where
                 return current_effect;
             }
 
-            // If a RelayTo effect is returned, stop the shortest path traversal and return it
-            if let EffectValue::RelayTo(_, _) = current_effect.value {
+            // If a RelayTo command is returned, stop the shortest path traversal and return it
+            if current_effect.command_target().is_some() {
                 return current_effect;
             }
         }

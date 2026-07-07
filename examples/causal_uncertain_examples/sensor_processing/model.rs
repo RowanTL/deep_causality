@@ -5,16 +5,16 @@
 
 //! Stage functions for the sensor-processing `PropagatingProcess` chain.
 //!
-//! Each stage takes the previous stage's value out of `EffectValue::Value`,
+//! Each stage takes the previous stage's value out of `CausalEffect::Value`,
 //! mutates `FleetState`, appends an `EffectLog` entry, and re-lifts the new
-//! value. Stages short-circuit by returning `EffectValue::None` with an
+//! value. Stages short-circuit by returning `CausalEffect::none()` with an
 //! attached `CausalityError` when an unrecoverable precondition fails.
 
 use crate::model_types::{
     Bands, FleetConfig, FleetProcess, FleetState, ProcessedReadings, RawReadings, RiskLevel,
     SensorReading, SensorStatus,
 };
-use deep_causality_core::{CausalityError, CausalityErrorEnum, EffectLog, EffectValue};
+use deep_causality_core::{CausalEffect, CausalityError, CausalityErrorEnum, EffectLog};
 use deep_causality_haft::LogAddEntry;
 use deep_causality_uncertain::Uncertain;
 use std::collections::HashMap;
@@ -26,13 +26,12 @@ fn process_failure(
     ctx: Option<FleetConfig>,
     msg: &str,
 ) -> FleetProcess<ProcessedReadings> {
-    FleetProcess {
-        value: EffectValue::None,
+    FleetProcess::new(
+        Err(CausalityError::new(CausalityErrorEnum::Custom(msg.into()))),
         state,
-        context: ctx,
-        error: Some(CausalityError::new(CausalityErrorEnum::Custom(msg.into()))),
-        logs: EffectLog::new(),
-    }
+        ctx,
+        EffectLog::new(),
+    )
 }
 
 fn band_for<'a>(sensor_id: &str, config: &'a FleetConfig) -> Option<&'a Bands> {
@@ -67,7 +66,7 @@ fn apply_calibration(reading: &SensorReading, config: &FleetConfig) -> Option<f6
 
 /// Stage 1 — robust per-sensor processing into `Uncertain<f64>` or an error tag.
 pub fn process_stage(
-    value: EffectValue<RawReadings>,
+    value: CausalEffect<RawReadings>,
     state: FleetState,
     ctx: Option<FleetConfig>,
 ) -> FleetProcess<ProcessedReadings> {
@@ -110,18 +109,17 @@ pub fn process_stage(
         processed.len()
     ));
 
-    FleetProcess {
-        value: EffectValue::Value(ProcessedReadings(processed)),
+    FleetProcess::new(
+        Ok(CausalEffect::value(ProcessedReadings(processed))),
         state,
-        context: ctx,
-        error: None,
+        ctx,
         logs,
-    }
+    )
 }
 
 /// Stage 2 — accumulate per-sensor health counts and total uncertainty into state.
 pub fn validate_stage(
-    value: EffectValue<ProcessedReadings>,
+    value: CausalEffect<ProcessedReadings>,
     mut state: FleetState,
     ctx: Option<FleetConfig>,
 ) -> FleetProcess<ProcessedReadings> {
@@ -166,18 +164,12 @@ pub fn validate_stage(
         ));
     }
 
-    FleetProcess {
-        value: EffectValue::Value(processed),
-        state,
-        context: ctx,
-        error: None,
-        logs,
-    }
+    FleetProcess::new(Ok(CausalEffect::value(processed)), state, ctx, logs)
 }
 
 /// Stage 3 — inverse-variance fuse the temperature sensors; write fused mean into state.
 pub fn fusion_stage(
-    value: EffectValue<ProcessedReadings>,
+    value: CausalEffect<ProcessedReadings>,
     mut state: FleetState,
     ctx: Option<FleetConfig>,
 ) -> FleetProcess<ProcessedReadings> {
@@ -241,18 +233,12 @@ pub fn fusion_stage(
         }
     }
 
-    FleetProcess {
-        value: EffectValue::Value(processed),
-        state,
-        context: ctx,
-        error: None,
-        logs,
-    }
+    FleetProcess::new(Ok(CausalEffect::value(processed)), state, ctx, logs)
 }
 
 /// Stage 4 — detect per-sensor anomalies against nominal bands.
 pub fn anomaly_stage(
-    value: EffectValue<ProcessedReadings>,
+    value: CausalEffect<ProcessedReadings>,
     mut state: FleetState,
     ctx: Option<FleetConfig>,
 ) -> FleetProcess<ProcessedReadings> {
@@ -280,18 +266,12 @@ pub fn anomaly_stage(
         logs.add_entry("stage4.anomaly: no anomalies detected");
     }
 
-    FleetProcess {
-        value: EffectValue::Value(processed),
-        state,
-        context: ctx,
-        error: None,
-        logs,
-    }
+    FleetProcess::new(Ok(CausalEffect::value(processed)), state, ctx, logs)
 }
 
 /// Stage 5 — cross-validate temperature against pressure (physics check).
 pub fn fallback_stage(
-    value: EffectValue<ProcessedReadings>,
+    value: CausalEffect<ProcessedReadings>,
     mut state: FleetState,
     ctx: Option<FleetConfig>,
 ) -> FleetProcess<ProcessedReadings> {
@@ -325,18 +305,12 @@ pub fn fallback_stage(
         }
     }
 
-    FleetProcess {
-        value: EffectValue::Value(processed),
-        state,
-        context: ctx,
-        error: None,
-        logs,
-    }
+    FleetProcess::new(Ok(CausalEffect::value(processed)), state, ctx, logs)
 }
 
 /// Stage 6 — derive a final risk verdict from accumulated state.
 pub fn reliability_stage(
-    value: EffectValue<ProcessedReadings>,
+    value: CausalEffect<ProcessedReadings>,
     mut state: FleetState,
     ctx: Option<FleetConfig>,
 ) -> FleetProcess<ProcessedReadings> {
@@ -367,11 +341,5 @@ pub fn reliability_stage(
         "stage6.reliability: health={health_pct:.1}% verdict={verdict:?}"
     ));
 
-    FleetProcess {
-        value: EffectValue::Value(processed),
-        state,
-        context: ctx,
-        error: None,
-        logs,
-    }
+    FleetProcess::new(Ok(CausalEffect::value(processed)), state, ctx, logs)
 }

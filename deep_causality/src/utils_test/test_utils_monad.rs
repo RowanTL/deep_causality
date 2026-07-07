@@ -2,14 +2,14 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2023 - 2026. The DeepCausality Authors and Contributors. All Rights Reserved.
  */
-use crate::{CausalityError, CausalityErrorEnum, EffectLog, EffectValue, PropagatingEffect};
+use crate::{CausalEffect, CausalityError, CausalityErrorEnum, EffectLog, PropagatingEffect};
 use deep_causality_haft::LogAddEntry;
 
 // f(U_smoking) -> Smoking
 // Input: Nicotine level (f64)
 // Output: High Nicotine (bool)
 pub fn smoking_logic(
-    nicotine_obs: EffectValue<f64>,
+    nicotine_obs: CausalEffect<f64>,
     _state: (),
     _ctx: Option<()>,
 ) -> PropagatingEffect<bool> {
@@ -22,16 +22,14 @@ pub fn smoking_logic(
         nicotine_val, threshold, high_nicotine
     ));
 
-    let mut effect = PropagatingEffect::pure(high_nicotine);
-    effect.logs = log;
-    effect
+    PropagatingEffect::from_value_with_log(high_nicotine, log)
 }
 
 // f(Smoking) -> Tar
 // Input: Is Smoking (bool)
 // Output: Has Tar (bool)
 pub fn tar_logic(
-    is_smoking: EffectValue<bool>,
+    is_smoking: CausalEffect<bool>,
     _state: (),
     _ctx: Option<()>,
 ) -> PropagatingEffect<bool> {
@@ -39,22 +37,23 @@ pub fn tar_logic(
     let smoking = is_smoking.into_value().unwrap_or(false);
     log.add_entry(&format!("Has tar in lung {}", smoking));
 
-    let mut effect = PropagatingEffect::pure(smoking);
-    effect.logs = log;
-    effect
+    PropagatingEffect::from_value_with_log(smoking, log)
 }
 
 pub fn error_logic(
-    _val: EffectValue<bool>,
+    _val: CausalEffect<bool>,
     _state: (),
     _ctx: Option<()>,
 ) -> PropagatingEffect<bool> {
     let mut log = EffectLog::new();
     log.add_entry("Error logic applied");
 
-    let mut effect = PropagatingEffect::from_error(CausalityError::new(
-        CausalityErrorEnum::Custom("Simulated error".to_string()),
-    ));
-    effect.logs = log;
-    effect
+    PropagatingEffect::new(
+        Err(CausalityError::new(CausalityErrorEnum::Custom(
+            "Simulated error".to_string(),
+        ))),
+        (),
+        None,
+        log,
+    )
 }

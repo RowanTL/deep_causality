@@ -69,7 +69,7 @@ fn main() {
         control_context.add_node(no_drug_datoid).unwrap();
 
         // --- Instantiate Causaloids for each scenario ---
-        // New API: ContextualCausalFn = fn(EffectValue<I>, S, Option<C>) -> PropagatingProcess<O, S, C>
+        // New API: ContextualCausalFn = fn(CausalEffect<I>, S, Option<C>) -> PropagatingProcess<O, S, C>
         let treatment_causaloid = Causaloid::new_with_context(
             DRUG_EFFECT_CAUSALOID_ID,
             model::drug_effect_logic,
@@ -90,19 +90,19 @@ fn main() {
 
         let y1_res = treatment_causaloid.evaluate(&input_effect);
         if y1_res.is_err() {
-            eprintln!("Treatment evaluation failed: {:?}", y1_res.error);
+            eprintln!("Treatment evaluation failed: {:?}", y1_res.error());
             continue;
         }
 
-        let y1_effect = y1_res.value.into_value().unwrap_or(0.0);
+        let y1_effect = y1_res.value_cloned().unwrap_or(0.0);
 
         let y0_res = control_causaloid.evaluate(&input_effect);
         if y0_res.is_err() {
-            eprintln!("Control evaluation failed: {:?}", y0_res.error);
+            eprintln!("Control evaluation failed: {:?}", y0_res.error());
             continue;
         }
 
-        let y0_effect = y0_res.value.into_value().unwrap_or(0.0);
+        let y0_effect = y0_res.value_cloned().unwrap_or(0.0);
 
         let y1 = initial_bp + y1_effect; // Potential outcome if treated
         let y0 = initial_bp + y0_effect; // Potential outcome if not treated

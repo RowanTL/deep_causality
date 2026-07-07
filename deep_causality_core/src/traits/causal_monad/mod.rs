@@ -21,16 +21,20 @@
 //! exists so that generic code can bind against the contract, and so the API reflects the intent
 //! (a state-threading monad) at the type level.
 
-use crate::{CausalEffectPropagationProcess, CausalityError, EffectLog, EffectValue};
+use crate::{CausalEffect, CausalEffectPropagationProcess, CausalityError, EffectLog};
 
 /// The state-threading effect monad for the propagating-effect family.
 ///
 /// Implemented for `CausalEffectPropagationProcess<_, _, _, CausalityError, EffectLog>`, which
 /// covers both `PropagatingEffect<T>` and `PropagatingProcess<T, S, C>`.
 ///
-/// `bind` short-circuits on error (value becomes `EffectValue::None`, state/context/log preserved),
-/// otherwise calls the continuation with the value, state, and context and keeps the state/context
-/// of the process the continuation returns; logs are appended across the step.
+/// `bind` short-circuits on error as a left zero (the continuation is NOT invoked; error,
+/// state, context, and logs are preserved verbatim), otherwise calls the continuation with the
+/// value, state, and context and keeps the state/context of the process the continuation
+/// returns; logs are appended across the step. Because value and error are one channel
+/// (`Result<CausalEffect<Value>, Error>` — the W-invariant by construction), the three monad
+/// laws hold unconditionally; right identity `bind(m, pure) = m` needs no well-formedness
+/// precondition. Machine-checked in `lean/DeepCausalityFormal/Core/CausalMonad.lean`.
 pub trait CausalMonad: Sized {
     /// The carried value type.
     type Value;
@@ -55,7 +59,7 @@ pub trait CausalMonad: Sized {
     >
     where
         F: FnOnce(
-            EffectValue<Self::Value>,
+            CausalEffect<Self::Value>,
             Self::State,
             Option<Self::Context>,
         ) -> CausalEffectPropagationProcess<
@@ -77,13 +81,12 @@ where
     type Context = Context;
 
     fn pure(value: Value) -> Self {
-        Self {
-            value: EffectValue::Value(value),
-            state: State::default(),
-            context: None,
-            error: None,
-            logs: EffectLog::new(),
-        }
+        Self::new(
+            Ok(CausalEffect::value(value)),
+            State::default(),
+            None,
+            EffectLog::new(),
+        )
     }
 
     fn bind<NewValue, F>(
@@ -92,7 +95,7 @@ where
     ) -> CausalEffectPropagationProcess<NewValue, State, Context, CausalityError, EffectLog>
     where
         F: FnOnce(
-            EffectValue<Value>,
+            CausalEffect<Value>,
             State,
             Option<Context>,
         ) -> CausalEffectPropagationProcess<

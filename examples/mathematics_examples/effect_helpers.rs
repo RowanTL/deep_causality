@@ -18,8 +18,8 @@
 //! `StepLog` for why that matters here.
 
 use deep_causality_core::{
-    CausalEffectPropagationProcess, CausalEffectPropagationProcessWitness, CausalityError,
-    CausalityErrorEnum, EffectValue,
+    CausalEffect, CausalEffectPropagationProcess, CausalEffectPropagationProcessWitness,
+    CausalityError, CausalityErrorEnum,
 };
 use deep_causality_haft::LogAppend;
 
@@ -66,35 +66,19 @@ pub type ProcessWitness = CausalEffectPropagationProcessWitness<(), (), Causalit
 
 /// Build a successful step result with an accompanying log line.
 pub fn ok<T, S: Into<String>>(value: T, msg: S) -> Process<T> {
-    CausalEffectPropagationProcess {
-        value: EffectValue::Value(value),
-        state: (),
-        context: None,
-        error: None,
-        logs: StepLog::one(msg),
-    }
+    CausalEffectPropagationProcess::new(Ok(CausalEffect::value(value)), (), None, StepLog::one(msg))
 }
 
 /// Build a failing step. The error short-circuits subsequent `bind` calls.
 pub fn fail<T, S: Into<String>>(reason: S) -> Process<T> {
-    CausalEffectPropagationProcess {
-        value: EffectValue::None,
-        state: (),
-        context: None,
-        error: Some(CausalityError::new(CausalityErrorEnum::Custom(
+    CausalEffectPropagationProcess::new(
+        Err(CausalityError::new(CausalityErrorEnum::Custom(
             reason.into(),
         ))),
-        logs: StepLog::one("failed step"),
-    }
-}
-
-/// Unwrap the final value for printing. Panics if the chain errored; the
-/// examples check `process.error` before calling this.
-pub fn expect_value<T: std::fmt::Debug + Clone>(v: &EffectValue<T>) -> T {
-    match v {
-        EffectValue::Value(t) => t.clone(),
-        other => panic!("Expected EffectValue::Value, got {:?}", other),
-    }
+        (),
+        None,
+        StepLog::one("failed step"),
+    )
 }
 
 /// Pretty-print the accumulated step log.

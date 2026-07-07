@@ -9,7 +9,7 @@
 //! Each pipe segment is a named stage; the segments are composed into one
 //! `CausalFlow` pipeline that threads the fluid state through the value channel.
 
-use deep_causality_core::{CausalFlow, EffectValue, PropagatingEffect, PropagatingProcess};
+use deep_causality_core::{CausalEffect, CausalFlow, PropagatingEffect, PropagatingProcess};
 use deep_causality_physics::{Density, Length, PhysicsError, Pressure, Speed, bernoulli_pressure};
 
 /// Switch this alias to `f32` for low precision, `f64` for standard precision,
@@ -64,7 +64,7 @@ fn main() -> Result<(), PhysicsError> {
 
     // Print summary
     println!("\n=== Simulation Complete ===");
-    if let EffectValue::Value(final_state) = process.value() {
+    if let Some(final_state) = process.value() {
         println!(
             "Final State: {} at P={:.1} Pa, v={:.2} m/s, h={:.1} m",
             final_state.description,
@@ -101,7 +101,7 @@ fn flow_segment(
         &new_height,
         &density,
     );
-    let new_pressure = p_effect.value().clone().into_value().unwrap();
+    let new_pressure = p_effect.value_cloned().unwrap();
 
     FluidState {
         pressure: new_pressure,
@@ -113,7 +113,7 @@ fn flow_segment(
 
 /// Segment 1: main pipe (diameter 0.2 m, height 10 m).
 fn segment_main_pipe(
-    value: EffectValue<FluidState>,
+    value: CausalEffect<FluidState>,
     _state: (),
     _ctx: Option<()>,
 ) -> PropagatingProcess<FluidState, (), ()> {
@@ -131,7 +131,7 @@ fn segment_main_pipe(
 
 /// Segment 2: Venturi constriction (diameter 0.1 m, same height).
 fn segment_venturi(
-    value: EffectValue<FluidState>,
+    value: CausalEffect<FluidState>,
     _state: (),
     _ctx: Option<()>,
 ) -> PropagatingProcess<FluidState, (), ()> {
@@ -149,7 +149,7 @@ fn segment_venturi(
 
 /// Segment 3: vertical drop to the ground outlet (diameter 0.2 m, height 0 m).
 fn segment_vertical_drop(
-    value: EffectValue<FluidState>,
+    value: CausalEffect<FluidState>,
     _state: (),
     _ctx: Option<()>,
 ) -> PropagatingProcess<FluidState, (), ()> {

@@ -18,13 +18,13 @@
 //! 3. reconfigures the prescribed wall BC to that value through the solver's existing
 //!    `with_moving_wall` builder, then calls the unchanged `step(&self, field)`;
 //! 4. carries the new divergence-free field forward as `State`, and — on a dropout — marks the
-//!    substitution as a value alternation via [`Intervenable::intervene`].
+//!    substitution as a counterfactual value substitution via [`AlternatableValue::alternate_value`].
 //!
 //! The uncertain types never enter the solver core (design D6/C3): the collapse to `R` happens
 //! entirely in this stage, above `step`.
 
 use deep_causality_core::{
-    CausalFlow, CausalityError, CausalityErrorEnum, EffectLog, EffectValue, Intervenable,
+    AlternatableValue, CausalEffect, CausalFlow, CausalityError, CausalityErrorEnum, EffectLog,
     PropagatingProcess,
 };
 use deep_causality_uncertain::{MaybeUncertain, ProbabilisticType};
@@ -115,20 +115,19 @@ fn error_process<'m, const D: usize, R: DecNsScalar + ProbabilisticType>(
     context: Option<InflowContext<R>>,
     message: &str,
 ) -> InflowProcess<'m, D, R> {
-    PropagatingProcess {
-        value: EffectValue::None,
-        state,
-        context,
-        error: Some(CausalityError::new(CausalityErrorEnum::Custom(
+    PropagatingProcess::new(
+        Err(CausalityError::new(CausalityErrorEnum::Custom(
             message.to_string(),
         ))),
-        logs: EffectLog::new(),
-    }
+        state,
+        context,
+        EffectLog::new(),
+    )
 }
 
 /// One uncertain-inflow march step (the `CausalFlow` bind stage). See the module docs.
 pub fn inflow_march_step<'m, const D: usize, R>(
-    _incoming: EffectValue<R>,
+    _incoming: CausalEffect<R>,
     state: InflowMarchState<'m, D, R>,
     context: Option<InflowContext<R>>,
 ) -> InflowProcess<'m, D, R>
@@ -253,7 +252,7 @@ where
     };
 
     // 4. Carry the new field forward. On a dropout, the substitution is recorded as a value
-    //    alternation: the absent reading (None) is overridden by the fallback via `intervene`.
+    //    alternation: the absent reading (None) is overridden by the fallback via `alternate_value`.
     let next = InflowMarchState {
         solver: Some(solver),
         field: advanced,
@@ -261,19 +260,18 @@ where
         step: step + 1,
         in_dropout,
     };
-    let process = PropagatingProcess {
-        value: if dropout {
-            EffectValue::None
+    let process = PropagatingProcess::new(
+        Ok(if dropout {
+            CausalEffect::none()
         } else {
-            EffectValue::Value(inflow)
-        },
-        state: next,
-        context: Some(context),
-        error: None,
+            CausalEffect::value(inflow)
+        }),
+        next,
+        Some(context),
         logs,
-    };
+    );
     if dropout {
-        process.intervene(inflow)
+        process.alternate_value(inflow)
     } else {
         process
     }
@@ -321,13 +319,12 @@ where
 
     let initial = InflowMarchState::new(solver, field, zone.default_inflow());
     let context = InflowContext::new(zone, stream);
-    let seed = PropagatingProcess {
-        value: EffectValue::Value(zone.default_inflow()),
-        state: initial,
-        context: Some(context),
-        error: None,
-        logs: EffectLog::new(),
-    };
+    let seed = PropagatingProcess::new(
+        Ok(CausalEffect::value(zone.default_inflow())),
+        initial,
+        Some(context),
+        EffectLog::new(),
+    );
 
     let flow = CausalFlow::from(seed).iterate_n(steps, |flow| flow.bind(inflow_march_step));
     Ok(flow.into_process())

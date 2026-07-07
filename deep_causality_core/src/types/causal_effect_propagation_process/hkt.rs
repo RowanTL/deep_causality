@@ -3,7 +3,7 @@
  * Copyright (c) 2023 - 2026. The DeepCausality Authors and Contributors. All Rights Reserved.
  */
 
-use crate::{CausalEffectPropagationProcess, EffectValue};
+use crate::{CausalEffect, CausalEffectPropagationProcess};
 use core::marker::PhantomData;
 use deep_causality_haft::{
     Applicative, Functor, HKT, HKT5, LogAppend, NoConstraint, Placeholder, Pure, Satisfies,
@@ -41,14 +41,21 @@ where
         B: Satisfies<<Self as HKT>::Constraint>,
         Func: FnOnce(A) -> B,
     {
+        // Error short-circuits: `f` is not invoked; the error propagates (left zero). A value-less
+        // effect (`None` or a command) maps to `None` — no panic (the former `.expect` bug), and no
+        // manufactured error (the error type `E` is generic). Commands never reach the value functor
+        // (the reasoning engine folds them first), so mapping one to `None` is unreachable-defensive.
+        let outcome = match m_a.outcome {
+            Err(error) => Err(error),
+            Ok(effect) => match effect.into_value() {
+                Some(v) => Ok(CausalEffect::value(f(v))),
+                None => Ok(CausalEffect::none()),
+            },
+        };
         CausalEffectPropagationProcess {
-            value: EffectValue::Value(f(m_a
-                .value
-                .into_value()
-                .expect("Functor fmap on a non-error process should contain a value"))),
+            outcome,
             state: m_a.state,
             context: m_a.context,
-            error: m_a.error,
             logs: m_a.logs,
         }
     }
@@ -66,10 +73,9 @@ where
         T: Satisfies<<Self as HKT>::Constraint>,
     {
         CausalEffectPropagationProcess {
-            value: EffectValue::Value(value),
+            outcome: Ok(CausalEffect::value(value)),
             state: S::default(),
             context: None,
-            error: None,
             logs: L::default(),
         }
     }
@@ -93,18 +99,22 @@ where
     {
         let mut combined_logs = f_ab.logs;
         combined_logs.append(&mut f_a.logs);
+        let context = f_ab.context.or(f_a.context);
 
-        let error = f_ab.error.or(f_a.error);
-
-        let value = (f_ab.value.into_value().expect("Value expected in apply"))(
-            f_a.value.into_value().expect("Value expected in apply"),
-        );
+        // Error short-circuits: the function is not invoked; the first error propagates (left zero).
+        // If either side lacks a value (a `None` or command effect), the result is `None` — no panic.
+        let outcome = match (f_ab.outcome, f_a.outcome) {
+            (Err(error), _) | (_, Err(error)) => Err(error),
+            (Ok(func), Ok(arg)) => match (func.into_value(), arg.into_value()) {
+                (Some(mut func), Some(arg)) => Ok(CausalEffect::value(func(arg))),
+                _ => Ok(CausalEffect::none()),
+            },
+        };
 
         CausalEffectPropagationProcess {
-            value: EffectValue::Value(value),
+            outcome,
             state: f_ab.state,
-            context: f_ab.context.or(f_a.context),
-            error,
+            context,
             logs: combined_logs,
         }
     }

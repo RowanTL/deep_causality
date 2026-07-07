@@ -8,25 +8,24 @@
 use crate::model_types::{
     AircraftConfig, FlightProcess, FlightState, FloatType, SensorReading, Verdict,
 };
-use deep_causality_core::{EffectLog, EffectValue};
+use deep_causality_core::{CausalEffect, EffectLog};
 use deep_causality_haft::LogAddEntry;
 
 /// Build the initial chain: lift the sensor reading and aircraft config
 /// into a `FlightProcess`, then bind the Stage 1 sensor-collection step.
 pub fn build_chain(reading: SensorReading, cfg: AircraftConfig) -> FlightProcess<FloatType> {
-    let initial: FlightProcess<SensorReading> = FlightProcess::<SensorReading> {
-        value: EffectValue::Value(reading),
-        state: FlightState::default(),
-        context: Some(cfg),
-        error: None,
-        logs: EffectLog::new(),
-    };
+    let initial: FlightProcess<SensorReading> = FlightProcess::<SensorReading>::new(
+        Ok(CausalEffect::value(reading)),
+        FlightState::default(),
+        Some(cfg),
+        EffectLog::new(),
+    );
     initial.bind(collect_airspeed)
 }
 
 /// Stage 1. Sensor collection. Value channel projects from `SensorReading` to `FloatType` airspeed.
 pub fn collect_airspeed(
-    value: EffectValue<SensorReading>,
+    value: CausalEffect<SensorReading>,
     state: FlightState,
     ctx: Option<AircraftConfig>,
 ) -> FlightProcess<FloatType> {
@@ -36,18 +35,17 @@ pub fn collect_airspeed(
         "stage1.collect: airspeed_kn={:.0} altitude_ft={:.0}",
         reading.airspeed_kn, reading.altitude_ft
     ));
-    FlightProcess::<FloatType> {
-        value: EffectValue::Value(reading.airspeed_kn),
+    FlightProcess::<FloatType>::new(
+        Ok(CausalEffect::value(reading.airspeed_kn)),
         state,
-        context: ctx,
-        error: None,
+        ctx,
         logs,
-    }
+    )
 }
 
 /// Stage 2. Fold the airspeed margin into `state.risk`.
 pub fn airspeed_margin(
-    value: EffectValue<FloatType>,
+    value: CausalEffect<FloatType>,
     mut state: FlightState,
     ctx: Option<AircraftConfig>,
 ) -> FlightProcess<FloatType> {
@@ -82,18 +80,12 @@ pub fn airspeed_margin(
         ));
     }
 
-    FlightProcess::<FloatType> {
-        value: EffectValue::Value(airspeed),
-        state,
-        context: ctx,
-        error: None,
-        logs,
-    }
+    FlightProcess::<FloatType>::new(Ok(CausalEffect::value(airspeed)), state, ctx, logs)
 }
 
 /// Stage 3. Envelope evaluation. Produces the final verdict from `state.risk`.
 pub fn envelope_eval(
-    _value: EffectValue<FloatType>,
+    _value: CausalEffect<FloatType>,
     state: FlightState,
     ctx: Option<AircraftConfig>,
 ) -> FlightProcess<Verdict> {
@@ -103,11 +95,5 @@ pub fn envelope_eval(
         "stage3.envelope: risk={:.3} -> verdict={:?}",
         state.risk, verdict
     ));
-    FlightProcess::<Verdict> {
-        value: EffectValue::Value(verdict),
-        state,
-        context: ctx,
-        error: None,
-        logs,
-    }
+    FlightProcess::<Verdict>::new(Ok(CausalEffect::value(verdict)), state, ctx, logs)
 }

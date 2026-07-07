@@ -15,7 +15,7 @@
 
 use crate::types::causal_types::causaloid::causable_utils;
 use crate::{Causaloid, CausaloidType, StatefulMonadicCausable};
-use deep_causality_core::{CausalityError, CausalityErrorEnum, EffectValue, PropagatingProcess};
+use deep_causality_core::{CausalEffect, CausalityError, CausalityErrorEnum, PropagatingProcess};
 use std::fmt::Debug;
 
 impl<I, O, PS, C> StatefulMonadicCausable<I, O, PS, C> for Causaloid<I, O, PS, C>
@@ -33,166 +33,165 @@ where
         // Mirrors the bind-semantics on `CausalEffectPropagationProcess`:
         // an error process passes through downstream stages unchanged,
         // preserving state, context, and logs accumulated up to the failure.
-        if let Some(err) = incoming.error.clone() {
-            return PropagatingProcess {
-                value: EffectValue::None,
-                state: incoming.state.clone(),
-                context: incoming.context.clone(),
-                error: Some(err),
-                logs: incoming.logs.clone(),
-            };
-        }
+        // (Value and error are one channel, so an errored process provably
+        // carries no value for the stages below to consume.)
+        let incoming_value = match incoming.outcome() {
+            Err(err) => {
+                return PropagatingProcess::new(
+                    Err(err.clone()),
+                    incoming.state().clone(),
+                    incoming.context().clone(),
+                    incoming.logs().clone(),
+                );
+            }
+            Ok(value) => value.clone(),
+        };
 
         match self.causal_type {
             CausaloidType::Singleton => {
                 let id = self.id;
 
                 // Step 1: log the input. Threads incoming state, context, and logs.
-                let input_value: I = match incoming.value.clone() {
-                    EffectValue::Value(v) => v,
-                    EffectValue::None => {
-                        return PropagatingProcess {
-                            value: EffectValue::None,
-                            state: incoming.state.clone(),
-                            context: incoming.context.clone(),
-                            error: Some(CausalityError(CausalityErrorEnum::Custom(
+                // A command input flows through unchanged (recast to `O`); a `None` input is an error.
+                if incoming_value.is_command() {
+                    return PropagatingProcess::new(
+                        Ok(cast_effect_value(incoming_value)),
+                        incoming.state().clone(),
+                        incoming.context().clone(),
+                        incoming.logs().clone(),
+                    );
+                }
+                let input_value: I = match incoming_value.into_value() {
+                    Some(v) => v,
+                    None => {
+                        return PropagatingProcess::new(
+                            Err(CausalityError(CausalityErrorEnum::Custom(
                                 "Cannot evaluate: input value is None".into(),
                             ))),
-                            logs: incoming.logs.clone(),
-                        };
-                    }
-                    other => {
-                        // RelayTo / ContextualLink / Map flow through unchanged.
-                        return PropagatingProcess {
-                            value: cast_effect_value(other),
-                            state: incoming.state.clone(),
-                            context: incoming.context.clone(),
-                            error: None,
-                            logs: incoming.logs.clone(),
-                        };
+                            incoming.state().clone(),
+                            incoming.context().clone(),
+                            incoming.logs().clone(),
+                        );
                     }
                 };
 
                 let stage1 = causable_utils::log_input_stateful::<I, PS, C>(
                     input_value.clone(),
                     id,
-                    incoming.state.clone(),
-                    incoming.context.clone(),
+                    incoming.state().clone(),
+                    incoming.context().clone(),
                 );
+                let (_stage1_outcome, stage1_state, stage1_context, stage1_logs) =
+                    stage1.into_parts();
+
                 // Carry forward logs from the incoming process.
-                let mut combined_logs = incoming.logs.clone();
+                let mut combined_logs = incoming.logs().clone();
                 {
                     use deep_causality_haft::LogAppend;
-                    let mut s1_logs = stage1.logs.clone();
+                    let mut s1_logs = stage1_logs;
                     combined_logs.append(&mut s1_logs);
                 }
 
                 // Step 2: execute the causal logic statefully.
                 let stage2 = causable_utils::execute_causal_logic_stateful::<I, O, PS, C>(
                     input_value,
-                    stage1.state,
-                    stage1.context,
+                    stage1_state,
+                    stage1_context,
                     self,
                 );
+                let (stage2_outcome, stage2_state, stage2_context, stage2_logs) =
+                    stage2.into_parts();
 
                 {
                     use deep_causality_haft::LogAppend;
-                    let mut s2_logs = stage2.logs.clone();
+                    let mut s2_logs = stage2_logs;
                     combined_logs.append(&mut s2_logs);
                 }
 
-                if let Some(error) = stage2.error {
-                    return PropagatingProcess {
-                        value: EffectValue::None,
-                        state: stage2.state,
-                        context: stage2.context,
-                        error: Some(error),
-                        logs: combined_logs,
-                    };
-                }
-
-                let output_value: O = match stage2.value {
-                    EffectValue::Value(v) => v,
-                    EffectValue::None => {
-                        return PropagatingProcess {
-                            value: EffectValue::None,
-                            state: stage2.state,
-                            context: stage2.context,
-                            error: Some(CausalityError(CausalityErrorEnum::Custom(
-                                "Causaloid::evaluate_stateful: causal_fn returned None output"
-                                    .into(),
-                            ))),
-                            logs: combined_logs,
-                        };
+                let output_value: O = match stage2_outcome {
+                    Err(error) => {
+                        return PropagatingProcess::new(
+                            Err(error),
+                            stage2_state,
+                            stage2_context,
+                            combined_logs,
+                        );
                     }
-                    other => {
-                        // Pass through structural variants (RelayTo etc.) without further logging.
-                        return PropagatingProcess {
-                            value: other,
-                            state: stage2.state,
-                            context: stage2.context,
-                            error: None,
-                            logs: combined_logs,
-                        };
+                    // A command output passes through unchanged (same `O`) without further logging.
+                    Ok(effect) if effect.is_command() => {
+                        return PropagatingProcess::new(
+                            Ok(effect),
+                            stage2_state,
+                            stage2_context,
+                            combined_logs,
+                        );
                     }
+                    Ok(effect) => match effect.into_value() {
+                        Some(v) => v,
+                        None => {
+                            return PropagatingProcess::new(
+                                Err(CausalityError(CausalityErrorEnum::Custom(
+                                    "Causaloid::evaluate_stateful: causal_fn returned None output"
+                                        .into(),
+                                ))),
+                                stage2_state,
+                                stage2_context,
+                                combined_logs,
+                            );
+                        }
+                    },
                 };
 
                 // Step 3: log the output.
                 let stage3 = causable_utils::log_output_stateful::<O, PS, C>(
                     output_value,
                     id,
-                    stage2.state,
-                    stage2.context,
+                    stage2_state,
+                    stage2_context,
                 );
+                let (stage3_outcome, stage3_state, stage3_context, stage3_logs) =
+                    stage3.into_parts();
 
                 {
                     use deep_causality_haft::LogAppend;
-                    let mut s3_logs = stage3.logs.clone();
+                    let mut s3_logs = stage3_logs;
                     combined_logs.append(&mut s3_logs);
                 }
 
-                PropagatingProcess {
-                    value: stage3.value,
-                    state: stage3.state,
-                    context: stage3.context,
-                    error: None,
-                    logs: combined_logs,
-                }
+                PropagatingProcess::new(stage3_outcome, stage3_state, stage3_context, combined_logs)
             }
 
-            CausaloidType::Collection => PropagatingProcess {
-                value: EffectValue::None,
-                state: incoming.state.clone(),
-                context: incoming.context.clone(),
-                error: Some(CausalityError(CausalityErrorEnum::Custom(
+            CausaloidType::Collection => PropagatingProcess::new(
+                Err(CausalityError(CausalityErrorEnum::Custom(
                     "Stateful collection evaluation requires StatefulMonadicCausableCollection::evaluate_collection_stateful"
                         .into(),
                 ))),
-                logs: incoming.logs.clone(),
-            },
+                incoming.state().clone(),
+                incoming.context().clone(),
+                incoming.logs().clone(),
+            ),
 
-            CausaloidType::Graph => PropagatingProcess {
-                value: EffectValue::None,
-                state: incoming.state.clone(),
-                context: incoming.context.clone(),
-                error: Some(CausalityError(CausalityErrorEnum::Custom(
+            CausaloidType::Graph => PropagatingProcess::new(
+                Err(CausalityError(CausalityErrorEnum::Custom(
                     "Stateful graph evaluation requires StatefulMonadicCausableGraphReasoning::evaluate_subgraph_from_cause_stateful"
                         .into(),
                 ))),
-                logs: incoming.logs.clone(),
-            },
+                incoming.state().clone(),
+                incoming.context().clone(),
+                incoming.logs().clone(),
+            ),
         }
     }
 }
 
-/// Pass through structural [`EffectValue`] variants from input to output type.
+/// Pass through structural [`CausalEffect`] variants from input to output type.
 ///
 /// `RelayTo`, `ContextualLink`, and `Map` carry no payload of type `I` that
 /// would need transformation to `O`; they are control-flow markers. Returning
-/// `EffectValue::None` here is the conservative choice that surfaces a clear
+/// `CausalEffect::none()` here is the conservative choice that surfaces a clear
 /// signal at the next reasoning step (the caller can detect the change of
 /// kind). For singleton evaluation these variants are not expected on the
 /// input channel; the branch exists for completeness.
-fn cast_effect_value<I, O>(_v: EffectValue<I>) -> EffectValue<O> {
-    EffectValue::None
+fn cast_effect_value<I, O>(_v: CausalEffect<I>) -> CausalEffect<O> {
+    CausalEffect::none()
 }

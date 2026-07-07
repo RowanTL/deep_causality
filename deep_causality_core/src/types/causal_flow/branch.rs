@@ -13,7 +13,7 @@
 // either arm.
 
 use crate::{
-    CausalEffectPropagationProcess, CausalFlow, CausalityError, CausalityErrorEnum, EffectValue,
+    CausalEffect, CausalEffectPropagationProcess, CausalFlow, CausalityError, CausalityErrorEnum,
     Either,
 };
 
@@ -26,13 +26,7 @@ impl<Value, State, Context> CausalFlow<Value, State, Context> {
         T: FnOnce(Self) -> Self,
         F: FnOnce(Self) -> Self,
     {
-        if self.is_err() {
-            return self;
-        }
-        let take_true = match &self.inner.value {
-            EffectValue::Value(v) => Some(cond(v)),
-            _ => None,
-        };
+        let take_true = self.inner.value().map(cond);
         match take_true {
             Some(true) => on_true(self),
             Some(false) => on_false(self),
@@ -48,12 +42,9 @@ impl<Value, State, Context> CausalFlow<Value, State, Context> {
         T: FnOnce(Self) -> Self,
         F: FnOnce(Self) -> Self,
     {
-        if self.is_err() {
-            return self;
-        }
-        let take_true = match &self.inner.value {
-            EffectValue::Value(v) => Some(cond(v, &self.inner.state, self.inner.context.as_ref())),
-            _ => None,
+        let take_true = match self.inner.value() {
+            Some(v) => Some(cond(v, &self.inner.state, self.inner.context.as_ref())),
+            None => None,
         };
         match take_true {
             Some(true) => on_true(self),
@@ -65,86 +56,55 @@ impl<Value, State, Context> CausalFlow<Value, State, Context> {
 
 impl<L, R, State, Context> CausalFlow<Either<L, R>, State, Context> {
     /// Route a flow whose value is `Either<L, R>` to its arm: `left` on `Left`, `right` on `Right`.
-    /// An errored flow short-circuits without running either arm. A `None` carrier passes through as
-    /// a value-less `CausalFlow<U>`; a `ContextualLink` carries its routing metadata through
-    /// unchanged; a `RelayTo` / `Map` dispatch carrier, which a value-level route cannot retype to
-    /// `U`, surfaces a `ValueNotAvailable` error rather than being silently dropped.
+    /// An errored flow short-circuits without running either arm. A `None` effect passes through as
+    /// a value-less `CausalFlow<U>`; a command effect, which a value-level route cannot retype to
+    /// `U`, surfaces a `ValueNotAvailable` error rather than being silently dropped (unreachable-
+    /// defensive — the reasoning engine folds commands first).
     pub fn either<U, FL, FR>(self, left: FL, right: FR) -> CausalFlow<U, State, Context>
     where
         FL: FnOnce(CausalFlow<L, State, Context>) -> CausalFlow<U, State, Context>,
         FR: FnOnce(CausalFlow<R, State, Context>) -> CausalFlow<U, State, Context>,
     {
-        let inner = self.inner;
-        // An errored or value-less carrier carries no `Either`, so re-thread state/context/logs into
-        // a `CausalFlow<U>` without running an arm.
-        let (value, state, context, error, logs) = (
-            inner.value,
-            inner.state,
-            inner.context,
-            inner.error,
-            inner.logs,
-        );
-        if error.is_some() {
-            return CausalFlow {
-                inner: CausalEffectPropagationProcess {
-                    value: EffectValue::None,
-                    state,
-                    context,
-                    error,
-                    logs,
-                },
-            };
-        }
-        match value {
-            EffectValue::Value(Either::Left(l)) => left(CausalFlow {
-                inner: CausalEffectPropagationProcess {
-                    value: EffectValue::Value(l),
-                    state,
-                    context,
-                    error: None,
-                    logs,
-                },
-            }),
-            EffectValue::Value(Either::Right(r)) => right(CausalFlow {
-                inner: CausalEffectPropagationProcess {
-                    value: EffectValue::Value(r),
-                    state,
-                    context,
-                    error: None,
-                    logs,
-                },
-            }),
-            // No value to route: thread the empty carrier through as a value-less `CausalFlow<U>`.
-            EffectValue::None => CausalFlow {
-                inner: CausalEffectPropagationProcess {
-                    value: EffectValue::None,
-                    state,
-                    context,
-                    error: None,
-                    logs,
-                },
+        let (outcome, state, context, logs) = self.inner.into_parts();
+        match outcome {
+            // An errored carrier carries no `Either`: short-circuit without running an arm.
+            Err(error) => CausalFlow {
+                inner: CausalEffectPropagationProcess::new(Err(error), state, context, logs),
             },
-            // A structured-result link carries no `Either` to route; preserve its routing metadata
-            // (the contextoid ids) rather than discarding it.
-            EffectValue::ContextualLink(a, b) => CausalFlow {
-                inner: CausalEffectPropagationProcess {
-                    value: EffectValue::ContextualLink(a, b),
+            // A command effect cannot be retyped to `U`; surface it rather than dropping it.
+            Ok(effect) if effect.is_command() => CausalFlow {
+                inner: CausalEffectPropagationProcess::new(
+                    Err(CausalityError::new(CausalityErrorEnum::ValueNotAvailable)),
                     state,
                     context,
-                    error: None,
                     logs,
-                },
+                ),
             },
-            // `RelayTo` / `Map` carry a `PropagatingEffect<Either<L, R>>` a value-level route cannot
-            // retype to `U`; surface the dropped dispatch command as an error instead of silently
-            // collapsing it to `None`.
-            _ => CausalFlow {
-                inner: CausalEffectPropagationProcess {
-                    value: EffectValue::None,
-                    state,
-                    context,
-                    error: Some(CausalityError::new(CausalityErrorEnum::ValueNotAvailable)),
-                    logs,
+            Ok(effect) => match effect.into_value() {
+                Some(Either::Left(l)) => left(CausalFlow {
+                    inner: CausalEffectPropagationProcess::new(
+                        Ok(CausalEffect::value(l)),
+                        state,
+                        context,
+                        logs,
+                    ),
+                }),
+                Some(Either::Right(r)) => right(CausalFlow {
+                    inner: CausalEffectPropagationProcess::new(
+                        Ok(CausalEffect::value(r)),
+                        state,
+                        context,
+                        logs,
+                    ),
+                }),
+                // No value to route: thread the empty carrier through as a value-less `CausalFlow<U>`.
+                None => CausalFlow {
+                    inner: CausalEffectPropagationProcess::new(
+                        Ok(CausalEffect::none()),
+                        state,
+                        context,
+                        logs,
+                    ),
                 },
             },
         }

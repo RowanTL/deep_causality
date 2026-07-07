@@ -4,41 +4,77 @@
  */
 
 // =============================================================================
-// Fluent steps (hide `EffectValue` + auto short-circuit)
+// Fluent steps (hide `CausalEffect` + auto short-circuit)
 // =============================================================================
 
 use crate::types::causal_flow::{err_leaf, ok_leaf};
 use crate::{
-    CausalEffectPropagationProcess, CausalFlow, CausalityError, CausalityErrorEnum, EffectLog,
-    EffectValue, PropagatingProcess,
+    CausalEffect, CausalEffectPropagationProcess, CausalFlow, CausalityError, CausalityErrorEnum,
+    EffectLog, PropagatingProcess,
 };
 
 // The fluent steps lower to the monad's `bind` / `bind_or_error`, which *move* state and context
 // through the carrier — they never clone them — so they impose no `Clone` bound on either. The loop
 // and branch combinators do not call `bind` and likewise carry no such bound.
 impl<Value, State, Context> CausalFlow<Value, State, Context> {
-    /// Full monadic step: the closure receives the unwrapped value and returns the next flow.
-    /// Effect-returning stages adapt with [`From`] / `.into()`. Short-circuits on error / no value.
+    /// The Kleisli bind of the causal monad — the one lawful sequencing step.
+    ///
+    /// The continuation receives `(value, state, context)` and returns the next flow, whose
+    /// state/context are threaded **forward** (`s0 → s1 → s2`) exactly as the monad's
+    /// [`bind`](crate::CausalEffectPropagationProcess::bind) threads them (`CausalMonad.lean ::
+    /// bind'`). The stateless case is a *specialization*, not a separate operation: with
+    /// `State = Context = ()` there is nothing to thread, so a stage written `|v, _, _| …` behaves
+    /// exactly as a value-only step would — which is why there is a single `and_then`, not a
+    /// value-only/stateful pair.
+    ///
+    /// A `None` effect short-circuits *lawfully*, mirroring [`map`](Self::map) and the Maybe monad:
+    /// it passes through unchanged (the continuation is NOT run and no error is manufactured), which
+    /// is what makes right identity `f >=> η = f` hold. A command effect carries a control
+    /// sub-program a value-level step cannot retype to `U`, so it surfaces a `ValueNotAvailable`
+    /// error rather than being dropped (unreachable-defensive — the reasoning engine folds commands
+    /// first). An upstream error short-circuits (left zero, handled by `bind`). Effect-returning
+    /// stages adapt with [`From`] / `.into()`.
     pub fn and_then<U, F>(self, f: F) -> CausalFlow<U, State, Context>
     where
-        F: FnOnce(Value) -> CausalFlow<U, State, Context>,
+        F: FnOnce(Value, State, Option<Context>) -> CausalFlow<U, State, Context>,
     {
-        let inner = self.inner.bind_or_error(
-            |v, _state, _context| f(v).inner,
-            "and_then received no value",
-        );
+        let inner = self.inner.bind(|effect, state, context| {
+            if effect.is_command() {
+                // A command cannot be retyped by a value-level step; the reasoning engine folds it
+                // first, so this is unreachable-defensive.
+                return CausalEffectPropagationProcess::new(
+                    Err(CausalityError::new(CausalityErrorEnum::ValueNotAvailable)),
+                    state,
+                    context,
+                    EffectLog::new(),
+                );
+            }
+            match effect.into_value() {
+                // Run the continuation on the threaded `(value, state, context)`, threading its
+                // returned state/context forward; `bind` prepends the upstream logs.
+                Some(v) => f(v, state, context).inner,
+                // A `None` effect short-circuits lawfully: continuation not run, channel preserved.
+                None => CausalEffectPropagationProcess::new(
+                    Ok(CausalEffect::none()),
+                    state,
+                    context,
+                    EffectLog::new(),
+                ),
+            }
+        });
         CausalFlow { inner }
     }
 
-    /// Compose the next sub-process (a whole pipeline) onto the flow. A pipeline is a function
-    /// `Value -> CausalFlow<U>`; `next` is the pipeline-composition verb, lowering to `bind` exactly
-    /// as [`and_then`](Self::and_then) does. A reified `CausalArrow` engine value is applied the same
-    /// way, with `and_then(|v| arrow.run(v))`.
+    /// The everyday value-only step: a stage `Fn(Value) -> CausalFlow<U>` that ignores state/context,
+    /// i.e. exactly `and_then(|v, _, _| pipeline(v))`. This is the drop-in for the vast majority of
+    /// pipelines; [`and_then`](Self::and_then) is the rarely-needed stateful form for stages that must
+    /// read or evolve state. It is **not** a second bind — just `and_then` with the state/context
+    /// inputs pre-ignored — so for stateless flows (`State = Context = ()`) the two coincide.
     pub fn next<U, F>(self, pipeline: F) -> CausalFlow<U, State, Context>
     where
         F: FnOnce(Value) -> CausalFlow<U, State, Context>,
     {
-        self.and_then(pipeline)
+        self.and_then(|v, _state, _context| pipeline(v))
     }
 
     /// Common stateless step: `Ok` lifts to a value, `Err` to the error channel.
@@ -56,36 +92,24 @@ impl<Value, State, Context> CausalFlow<Value, State, Context> {
         CausalFlow { inner }
     }
 
-    /// Value transform that mirrors the monad's [`fmap`] contract: apply `f` to a `Value`, pass
-    /// `None` and `ContextualLink` carriers through unchanged, and surface a `ValueNotAvailable`
-    /// error for the `RelayTo` / `Map` dispatch variants — whose embedded `PropagatingEffect`
-    /// cannot be retyped by a value-level map — rather than silently dropping the routing command.
-    /// An errored carrier short-circuits (handled by `bind`).
+    /// Value transform that mirrors the monad's [`fmap`] contract: apply `f` to a `Value`, pass a
+    /// `None` effect through unchanged, and surface a `ValueNotAvailable` error for a command effect
+    /// (whose control sub-program a single-shot value map cannot retype) — unreachable-defensive,
+    /// since the reasoning engine folds commands first. An errored carrier short-circuits (via `bind`).
     ///
     /// [`fmap`]: crate::CausalEffectPropagationProcess::fmap
     pub fn map<U, F>(self, f: F) -> CausalFlow<U, State, Context>
     where
         F: FnOnce(Value) -> U,
     {
-        let inner = self.inner.bind(|ev, state, context| {
-            let (value, error) = match ev {
-                EffectValue::Value(v) => (EffectValue::Value(f(v)), None),
-                EffectValue::None => (EffectValue::None, None),
-                EffectValue::ContextualLink(a, b) => (EffectValue::ContextualLink(a, b), None),
-                // RelayTo / Map carry a `PropagatingEffect<Value>` a value-level map cannot
-                // retype; surface the dropped dispatch command instead of collapsing to `None`.
-                _ => (
-                    EffectValue::None,
-                    Some(CausalityError::new(CausalityErrorEnum::ValueNotAvailable)),
-                ),
+        let inner = self.inner.bind(|effect, state, context| {
+            let outcome = if effect.is_command() {
+                Err(CausalityError::new(CausalityErrorEnum::ValueNotAvailable))
+            } else {
+                // `Pure(Some(v)) → Some(f(v))`; `Pure(None) → None`.
+                Ok(CausalEffect::from_option(effect.into_value().map(f)))
             };
-            CausalEffectPropagationProcess {
-                value,
-                state,
-                context,
-                error,
-                logs: EffectLog::new(),
-            }
+            CausalEffectPropagationProcess::new(outcome, state, context, EffectLog::new())
         });
         CausalFlow { inner }
     }
@@ -110,17 +134,23 @@ impl<Value, State, Context> CausalFlow<Value, State, Context> {
     where
         F: FnOnce(CausalityError) -> Value,
     {
-        match self.inner.error {
-            Some(err) => CausalFlow {
-                inner: CausalEffectPropagationProcess {
-                    value: EffectValue::Value(f(err)),
-                    state: self.inner.state,
-                    context: self.inner.context,
-                    error: None,
-                    logs: self.inner.logs,
-                },
+        match self.inner.outcome {
+            Err(err) => CausalFlow {
+                inner: CausalEffectPropagationProcess::new(
+                    Ok(CausalEffect::value(f(err))),
+                    self.inner.state,
+                    self.inner.context,
+                    self.inner.logs,
+                ),
             },
-            None => self,
+            Ok(value) => CausalFlow {
+                inner: CausalEffectPropagationProcess::new(
+                    Ok(value),
+                    self.inner.state,
+                    self.inner.context,
+                    self.inner.logs,
+                ),
+            },
         }
     }
 
@@ -221,7 +251,7 @@ impl<Value, State, Context> CausalFlow<Value, State, Context> {
     pub fn bind<U, F>(self, f: F) -> CausalFlow<U, State, Context>
     where
         F: FnOnce(
-            EffectValue<Value>,
+            CausalEffect<Value>,
             State,
             Option<Context>,
         ) -> PropagatingProcess<U, State, Context>,

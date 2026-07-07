@@ -11,7 +11,7 @@
 //! family:
 //!
 //! * **Rung 1 (Association)**: plain `bind` chain; no alternation.
-//! * **Rung 2 (Intervention)**: `intervene` mid-chain to apply
+//! * **Rung 2 (Intervention)**: `alternate_value` mid-chain to apply
 //!   `do(Tar := 0.0)`; the Smoking -> Tar link is severed before stage 2
 //!   reads the tar indicator.
 //! * **Rung 3 (Counterfactual)**: `alternate_context` at the seed to
@@ -25,7 +25,7 @@
 //! scaffolding.
 
 use deep_causality_core::{
-    AlternatableContext, EffectValue, Intervenable, PropagatingEffect, PropagatingProcess,
+    AlternatableContext, AlternatableValue, CausalEffect, PropagatingEffect, PropagatingProcess,
 };
 
 fn main() {
@@ -48,7 +48,7 @@ fn run_rung1_association() {
 
     let final_effect = start(world).bind(stage_has_tar).bind(stage_cancer_risk);
 
-    let cancer_risk = cancer_risk_from(&final_effect.value);
+    let cancer_risk = cancer_risk_from(final_effect.value().unwrap());
     println!("Result: high nicotine is associated with cancer risk = {cancer_risk}.");
     assert!(cancer_risk, "Rung 1: expected high cancer risk");
     println!();
@@ -67,10 +67,10 @@ fn run_rung2_intervention() {
 
     let final_effect = start(world)
         .bind(stage_has_tar)
-        .intervene(0.0_f64) // do(Tar := 0.0); alias for alternate_value(0.0)
+        .alternate_value(0.0_f64) // do(Tar := 0.0)
         .bind(stage_cancer_risk);
 
-    let cancer_risk = cancer_risk_from(&final_effect.value);
+    let cancer_risk = cancer_risk_from(final_effect.value().unwrap());
     println!("Result: under the intervention, cancer risk = {cancer_risk}.");
     assert!(
         !cancer_risk,
@@ -78,7 +78,7 @@ fn run_rung2_intervention() {
     );
 
     println!("\nAudit log (intervention run):");
-    println!("{}", final_effect.logs);
+    println!("{}", final_effect.logs());
     println!();
 }
 
@@ -106,8 +106,8 @@ fn run_rung3_counterfactual() {
         .bind(stage_has_tar)
         .bind(stage_cancer_risk);
 
-    let f_risk = cancer_risk_from(&factual_final.value);
-    let cf_risk = cancer_risk_from(&counterfactual_final.value);
+    let f_risk = cancer_risk_from(factual_final.value().unwrap());
+    let cf_risk = cancer_risk_from(counterfactual_final.value().unwrap());
 
     println!("Factual world (nicotine=0.8, tar=0.8):           cancer risk = {f_risk}");
     println!("Counterfactual (nicotine=0.1, tar=0.8 retained): cancer risk = {cf_risk}");
@@ -123,7 +123,7 @@ fn run_rung3_counterfactual() {
     );
 
     println!("\nAudit log (counterfactual run):");
-    println!("{}", counterfactual_final.logs);
+    println!("{}", counterfactual_final.logs());
     println!();
 }
 
@@ -151,7 +151,7 @@ fn start(world: SmokingContext) -> PropagatingProcess<f64, (), SmokingContext> {
 /// or tar has already accumulated. Emits a numeric tar indicator so the
 /// value channel is alternable mid-chain.
 fn stage_has_tar(
-    _value: EffectValue<f64>,
+    _value: CausalEffect<f64>,
     state: (),
     context: Option<SmokingContext>,
 ) -> PropagatingProcess<f64, (), SmokingContext> {
@@ -165,10 +165,10 @@ fn stage_has_tar(
 
 /// Stage 2 (`Tar -> Cancer`): cancer risk follows from the tar indicator
 /// the upstream stage produced. Reading from the value (not the Context)
-/// is what makes `intervene(...)` between the two stages a clean
+/// is what makes `alternate_value(...)` between the two stages a clean
 /// `do(Tar := x)`.
 fn stage_cancer_risk(
-    value: EffectValue<f64>,
+    value: CausalEffect<f64>,
     state: (),
     context: Option<SmokingContext>,
 ) -> PropagatingProcess<f64, (), SmokingContext> {
@@ -180,6 +180,6 @@ fn stage_cancer_risk(
     PropagatingProcess::with_state(next, state, context)
 }
 
-fn cancer_risk_from(value: &EffectValue<f64>) -> bool {
-    matches!(value, EffectValue::Value(v) if *v > 0.5)
+fn cancer_risk_from(value: &f64) -> bool {
+    *value > 0.5
 }

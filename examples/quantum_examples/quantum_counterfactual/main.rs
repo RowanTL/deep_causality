@@ -16,7 +16,7 @@
 //! each step is a named stage, and the value channel carries the "error detected" flag.
 
 use deep_causality_core::{
-    CausalEffectPropagationProcess, CausalFlow, EffectValue, PropagatingProcess,
+    CausalEffect, CausalEffectPropagationProcess, CausalFlow, PropagatingProcess,
 };
 use deep_causality_multivector::{HilbertState, Metric};
 use deep_causality_num::{Complex, DivisionAlgebra};
@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into_process();
 
     // Verification: access final state from the process struct.
-    let final_state_struct = &result.state;
+    let final_state_struct = result.state();
     let final_quantum_state = final_state_struct.states.last().unwrap();
     let prob_0 = final_quantum_state.as_inner().data()[0].norm_sqr();
 
@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Step 1: apply a gate that drifts the qubit into a bit-flip error state |1>.
 fn stage_apply_gate(
-    _value: EffectValue<()>,
+    _value: CausalEffect<()>,
     mut hist: QuantumHistory,
     ctx: Option<()>,
 ) -> PropagatingProcess<bool, QuantumHistory, ()> {
@@ -91,7 +91,7 @@ fn stage_apply_gate(
 
 /// Step 2: measure the syndrome. Raise the error flag if P(|1>) is dominant.
 fn stage_measure_syndrome(
-    prev_val_effect: EffectValue<bool>,
+    prev_val_effect: CausalEffect<bool>,
     hist: QuantumHistory,
     ctx: Option<()>,
 ) -> PropagatingProcess<bool, QuantumHistory, ()> {
@@ -114,7 +114,7 @@ fn stage_measure_syndrome(
 /// Step 3: counterfactual correction. On a detected error, rewind history to t=0 and
 /// re-apply the correct |0> state (an X gate in this metaphor).
 fn stage_correct(
-    error_detected_effect: EffectValue<bool>,
+    error_detected_effect: CausalEffect<bool>,
     mut hist: QuantumHistory,
     ctx: Option<()>,
 ) -> PropagatingProcess<bool, QuantumHistory, ()> {

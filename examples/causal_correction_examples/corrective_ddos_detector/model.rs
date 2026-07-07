@@ -10,7 +10,7 @@ use crate::model_types::{
     THROTTLE_ON, ThrottleState, ThroughputWindow, nominal_detector_config,
 };
 use causal_correction_examples::math_utils;
-use deep_causality_core::{EffectLog, EffectValue};
+use deep_causality_core::{CausalEffect, EffectLog};
 use deep_causality_haft::LogAddEntry;
 
 /// Offered load presented to the interface at `tick`, before any
@@ -115,7 +115,7 @@ pub fn baseline_zscore(window: &ThroughputWindow, sample: FloatType) -> Option<F
 /// baseline only if it is not anomalous. The throttle command is preserved in
 /// the value channel so the monitor can intervene on it.
 pub fn analyze_tick(
-    value: EffectValue<ThrottleState>,
+    value: CausalEffect<ThrottleState>,
     mut state: DetectorState,
     ctx: Option<DetectorConfig>,
 ) -> DetectorProcess<ThrottleState> {
@@ -179,21 +179,14 @@ pub fn analyze_tick(
         marker
     ));
 
-    DetectorProcess::<ThrottleState> {
-        value: EffectValue::Value(throttle),
-        state,
-        context: ctx,
-        error: None,
-        logs,
-    }
+    DetectorProcess::<ThrottleState>::new(Ok(CausalEffect::value(throttle)), state, ctx, logs)
 }
 
 pub fn initial_process() -> DetectorProcess<ThrottleState> {
-    DetectorProcess::<ThrottleState> {
-        value: EffectValue::Value(THROTTLE_OFF),
-        state: DetectorState::new(),
-        context: Some(nominal_detector_config()),
-        error: None,
-        logs: EffectLog::new(),
-    }
+    DetectorProcess::<ThrottleState>::new(
+        Ok(CausalEffect::value(THROTTLE_OFF)),
+        DetectorState::new(),
+        Some(nominal_detector_config()),
+        EffectLog::new(),
+    )
 }

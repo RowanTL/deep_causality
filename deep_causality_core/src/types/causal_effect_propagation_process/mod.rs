@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2023 - 2026. The DeepCausality Authors and Contributors. All Rights Reserved.
  */
-use crate::{CausalMonad, CausalityError, CausalityErrorEnum, EffectLog, EffectValue};
+use crate::{CausalEffect, CausalMonad, CausalityError, CausalityErrorEnum, EffectLog};
 use core::fmt::Debug;
 use deep_causality_haft::LogAppend;
 
@@ -13,7 +13,6 @@ mod display;
 mod explain;
 mod getters;
 pub mod hkt;
-mod intervenable;
 mod predicates;
 
 /// The fundamental unit of causal computation in DeepCausality.
@@ -24,7 +23,10 @@ mod predicates;
 ///
 /// # Concepts
 ///
-/// *   **Value**: The primary data being transformed (e.g., a signal, a decision).
+/// *   **Outcome**: The value-XOR-error channel — `Result<CausalEffect<Value>, Error>`, the
+///     `Either E (Maybe T)` encoding. A process either carries an effect value (possibly
+///     `None`) or an error, never both: the W-invariant
+///     (`error present ⇒ no value`) holds **by construction**, not by discipline.
 /// *   **State**: Persistent data that evolves as the process moves through the graph (Markovian state).
 /// *   **Context**: Read-only configuration or environment data available to all steps.
 /// *   **Error**: A failure state that short-circuits further computation but preserves logs.
@@ -37,18 +39,75 @@ mod predicates;
 /// This struct implements the [Monad](https://en.wikipedia.org/wiki/Monad_(functional_programming)) pattern
 /// to handle these concerns automatically, allowing users to focus on the domain logic ("Business Logic")
 /// rather than plumbing (error checking, logging).
+///
+/// Because value and error live in ONE channel, the three monad laws (left identity, right
+/// identity, associativity) hold **unconditionally** — including on errored carriers — and the
+/// error short-circuit is a left zero (`bind(raise e, f) = raise e`, `f` never runs). This is
+/// precondition P2 of the Causal Algebra program
+/// (`openspec/notes/causal-algebra/Formalization.md` §2), machine-checked in
+/// `lean/DeepCausalityFormal/Core/CausalMonad.lean`.
+///
+/// All fields are private; construct via [`new`](Self::new) (total — every representable state
+/// is valid) or the named constructors, decompose via [`into_parts`](Self::into_parts), and read
+/// via the getters in `getters.rs`.
 #[derive(Debug, PartialEq, Clone)]
 pub struct CausalEffectPropagationProcess<Value, State, Context, Error, Log> {
-    /// The current value of the computation.
-    pub value: EffectValue<Value>,
+    /// The value-XOR-error channel: an effect value, or the error that ended the computation.
+    pub(crate) outcome: Result<CausalEffect<Value>, Error>,
     /// The current state of the process (e.g., accumulated risk, counters).
-    pub state: State,
+    pub(crate) state: State,
     /// The optional execution context (e.g., global config, reference data).
-    pub context: Option<Context>,
-    /// The current error state. If `Some`, new `bind` operations will skip execution.
-    pub error: Option<Error>,
+    pub(crate) context: Option<Context>,
     /// The audit log containing the history of operations.
-    pub logs: Log,
+    pub(crate) logs: Log,
+}
+
+impl<Value, State, Context, Error, Log>
+    CausalEffectPropagationProcess<Value, State, Context, Error, Log>
+{
+    /// Total constructor over the single-channel representation.
+    ///
+    /// With value-XOR-error encoded as one `Result`, every combination of arguments is a
+    /// valid process — there is nothing to validate and no way to construct the formerly
+    /// representable invalid state (value AND error).
+    pub const fn new(
+        outcome: Result<CausalEffect<Value>, Error>,
+        state: State,
+        context: Option<Context>,
+        logs: Log,
+    ) -> Self {
+        Self {
+            outcome,
+            state,
+            context,
+            logs,
+        }
+    }
+
+    /// Decomposes the process into its channels: `(outcome, state, context, logs)`.
+    ///
+    /// The inverse of [`new`](Self::new); the by-value counterpart to the getters.
+    pub fn into_parts(
+        self,
+    ) -> (
+        Result<CausalEffect<Value>, Error>,
+        State,
+        Option<Context>,
+        Log,
+    ) {
+        (self.outcome, self.state, self.context, self.logs)
+    }
+
+    /// Consumes the process and returns the carried scalar, if any.
+    ///
+    /// This is the terminal "give me the result value" accessor: it yields `Some(v)` only when
+    /// the process carries a value effect, and `None` for an errored process, a `None` effect, or a
+    /// command. It is the by-value counterpart to [`value`](Self::value), and mirrors
+    /// [`CausalEffect::into_value`](crate::CausalEffect::into_value). Use it at the end of a chain
+    /// when you want the plain value out for display or comparison rather than a reference.
+    pub fn into_value(self) -> Option<Value> {
+        self.outcome.ok().and_then(CausalEffect::into_value)
+    }
 }
 
 impl<Value, State, Context, Error, Log>
@@ -61,34 +120,38 @@ where
     ///
     /// This is the primary method for building Markovian process chains, as the
     /// function `f` receives the value, state, and context from the previous step.
+    ///
+    /// Error short-circuits as a left zero: on an errored process, `f` is NOT invoked and the
+    /// process is returned reassembled verbatim (error, state, context, and logs preserved),
+    /// which is what makes right identity `bind(m, pure) = m` hold unconditionally.
     pub fn bind<F, NewValue>(
         self,
         f: F,
     ) -> CausalEffectPropagationProcess<NewValue, State, Context, Error, Log>
     where
         F: FnOnce(
-            EffectValue<Value>,
+            CausalEffect<Value>,
             State,
             Option<Context>,
         ) -> CausalEffectPropagationProcess<NewValue, State, Context, Error, Log>,
     {
-        if let Some(error) = self.error {
-            return CausalEffectPropagationProcess {
-                value: EffectValue::default(),
+        match self.outcome {
+            Err(error) => CausalEffectPropagationProcess {
+                outcome: Err(error),
                 state: self.state,
                 context: self.context,
-                error: Some(error),
                 logs: self.logs,
-            };
+            },
+            Ok(effect) => {
+                let mut next_process = f(effect, self.state, self.context);
+
+                let mut combined_logs = self.logs;
+                combined_logs.append(&mut next_process.logs);
+                next_process.logs = combined_logs;
+
+                next_process
+            }
         }
-
-        let mut next_process = f(self.value, self.state, self.context);
-
-        let mut combined_logs = self.logs;
-        combined_logs.append(&mut next_process.logs);
-        next_process.logs = combined_logs;
-
-        next_process
     }
 }
 
@@ -116,10 +179,9 @@ where
         initial_context: Option<Context>,
     ) -> Self {
         Self {
-            value: effect.value,
+            outcome: effect.outcome,
             state: initial_state,
             context: initial_context,
-            error: effect.error,
             logs: effect.logs,
         }
     }
@@ -137,21 +199,19 @@ where
     /// The state is set to default.
     pub fn from_error(err: CausalityError) -> Self {
         Self {
-            value: EffectValue::None,
+            outcome: Err(err),
             state: State::default(),
             context: None,
-            error: Some(err),
             logs: EffectLog::new(),
         }
     }
 
-    /// Creates a new process with `EffectValue::None`, default state, and no error.
+    /// Creates a new process carrying the `None` effect (absence of evidence), default state, no error.
     pub fn none() -> Self {
         Self {
-            value: EffectValue::None,
+            outcome: Ok(CausalEffect::none()),
             state: State::default(),
             context: None,
-            error: None,
             logs: EffectLog::new(),
         }
     }
@@ -163,13 +223,14 @@ where
 
     /// Maps the carried value with `f`, preserving state, context, and logs.
     ///
-    /// This is the fluent `Functor` operation on the carrier, the value-only counterpart to
-    /// [`bind`](Self::bind). It never panics. An error carrier short-circuits: the error and logs
-    /// are preserved and the value becomes `None`. A `None` or `ContextualLink` carrier passes
-    /// through unchanged. The dispatch variants `RelayTo` and `Map` embed a `PropagatingEffect`
-    /// whose value type cannot be retyped by a value-level map, so `fmap` over them surfaces a
-    /// `ValueNotAvailable` error rather than silently dropping the routing command; reach for
-    /// [`bind`](Self::bind) when you need to act on those variants.
+    /// The fluent `Functor` operation on the carrier, the value-only counterpart to
+    /// [`bind`](Self::bind). It never panics. An error carrier short-circuits (error + logs
+    /// preserved, `f` not invoked); a `None` effect passes through unchanged. A command effect
+    /// carries a control sub-program a single-shot value map cannot retype, so `fmap` over it
+    /// surfaces a `ValueNotAvailable` error — unreachable in practice, since the reasoning engine
+    /// interprets commands (via [`CausalEffect::fold`]) before any value-level map.
+    /// ([`CausalEffect::map`] is the total functor that also maps command leaves; the carrier `fmap`
+    /// stays single-shot for `FnOnce`.)
     pub fn fmap<NewValue, F>(
         self,
         f: F,
@@ -177,79 +238,70 @@ where
     where
         F: FnOnce(Value) -> NewValue,
     {
-        // Error short-circuits: preserve state, context, the error, and the accumulated log.
-        if self.error.is_some() {
-            return CausalEffectPropagationProcess {
-                value: EffectValue::None,
-                state: self.state,
-                context: self.context,
-                error: self.error,
-                logs: self.logs,
-            };
-        }
-
-        let (value, error) = match self.value {
-            EffectValue::Value(v) => (EffectValue::Value(f(v)), None),
-            EffectValue::None => (EffectValue::None, None),
-            EffectValue::ContextualLink(a, b) => (EffectValue::ContextualLink(a, b), None),
-            // RelayTo / Map carry a `PropagatingEffect<Value>` that a value-level `fmap` cannot
-            // retype to `NewValue`. Surface this instead of dropping the dispatch command.
-            _ => (
-                EffectValue::None,
-                Some(CausalityError::new(CausalityErrorEnum::ValueNotAvailable)),
-            ),
+        let outcome = match self.outcome {
+            // Error short-circuits: `f` is not invoked; the error is preserved.
+            Err(error) => Err(error),
+            Ok(effect) if effect.is_command() => {
+                Err(CausalityError::new(CausalityErrorEnum::ValueNotAvailable))
+            }
+            // `Pure(Some(v)) → Some(f(v))`; `Pure(None) → None`.
+            Ok(effect) => Ok(CausalEffect::from_option(effect.into_value().map(f))),
         };
 
         CausalEffectPropagationProcess {
-            value,
+            outcome,
             state: self.state,
             context: self.context,
-            error,
             logs: self.logs,
         }
     }
 
-    /// Creates a new process from a given `EffectValue`.
-    /// The state is set to default.
-    pub fn from_effect_value(effect_value: EffectValue<Value>) -> Self {
+    /// Creates a new process from a given [`CausalEffect`]. The state is set to default.
+    pub fn from_effect(effect: CausalEffect<Value>) -> Self {
         Self {
-            value: effect_value,
+            outcome: Ok(effect),
             state: State::default(),
             context: None,
-            error: None,
             logs: EffectLog::new(),
         }
     }
 
     pub fn from_value(value: Value) -> Self {
         Self {
-            value: EffectValue::Value(value),
+            outcome: Ok(CausalEffect::value(value)),
             state: State::default(),
             context: None,
-            error: None,
             logs: EffectLog::new(),
         }
     }
 
-    /// Creates a new process from a given `EffectValue` and `EffectLog`.
-    /// The state is set to default.
-    pub fn from_effect_value_with_log(value: EffectValue<Value>, logs: EffectLog) -> Self {
+    /// Creates a new process from a given [`CausalEffect`] and `EffectLog`. State set to default.
+    pub fn from_effect_with_log(effect: CausalEffect<Value>, logs: EffectLog) -> Self {
         Self {
-            value,
+            outcome: Ok(effect),
             state: State::default(),
             context: None,
-            error: None,
             logs,
         }
     }
 
     pub fn from_value_with_log(value: Value, logs: EffectLog) -> Self {
         Self {
-            value: EffectValue::Value(value),
+            outcome: Ok(CausalEffect::value(value)),
             state: State::default(),
             context: None,
-            error: None,
             logs,
+        }
+    }
+
+    /// Creates a control-carrier process: a `RelayTo(target, input)` adaptive-reasoning jump.
+    /// Default state, no context, empty log.
+    pub fn relay_to(target: usize, input: CausalEffect<Value>) -> Self {
+        Self {
+            outcome: Ok(CausalEffect::relay_to(target, input)),
+            state: State::default(),
+            context: None,
+            logs: EffectLog::new(),
         }
     }
 }
@@ -259,11 +311,13 @@ impl<Value, State, Context, Log>
 where
     Log: LogAppend + Default,
 {
-    /// Chains a computation while automatically unwrapping the inner `EffectValue`.
+    /// Chains a computation while automatically unwrapping the inner value effect.
     ///
-    /// If the `EffectValue` is `None`, this method short-circuits with a `CausalityError`
+    /// If the effect is `None`, this method short-circuits with a `CausalityError`
     /// containing the provided `err_msg`. This simplifies the common pattern of:
     /// `bind -> match effect_value { Some(v) => f(v), None => Error }`
+    ///
+    /// On an errored process, the continuation is NOT invoked (left zero).
     pub fn bind_or_error<F, NewValue>(
         self,
         f: F,
@@ -277,32 +331,29 @@ where
         )
             -> CausalEffectPropagationProcess<NewValue, State, Context, CausalityError, Log>,
     {
-        if let Some(error) = self.error {
-            return CausalEffectPropagationProcess {
-                value: EffectValue::default(),
+        match self.outcome {
+            Err(error) => CausalEffectPropagationProcess {
+                outcome: Err(error),
                 state: self.state,
                 context: self.context,
-                error: Some(error),
                 logs: self.logs,
-            };
-        }
-
-        match self.value.into_value() {
-            Some(v) => {
-                let mut next_process = f(v, self.state, self.context);
-                let mut combined_logs = self.logs;
-                combined_logs.append(&mut next_process.logs);
-                next_process.logs = combined_logs;
-                next_process
-            }
-            None => CausalEffectPropagationProcess {
-                value: EffectValue::default(),
-                state: self.state,
-                context: self.context,
-                error: Some(CausalityError(crate::CausalityErrorEnum::Custom(
-                    err_msg.into(),
-                ))),
-                logs: self.logs,
+            },
+            Ok(effect_value) => match effect_value.into_value() {
+                Some(v) => {
+                    let mut next_process = f(v, self.state, self.context);
+                    let mut combined_logs = self.logs;
+                    combined_logs.append(&mut next_process.logs);
+                    next_process.logs = combined_logs;
+                    next_process
+                }
+                None => CausalEffectPropagationProcess {
+                    outcome: Err(CausalityError(crate::CausalityErrorEnum::Custom(
+                        err_msg.into(),
+                    ))),
+                    state: self.state,
+                    context: self.context,
+                    logs: self.logs,
+                },
             },
         }
     }
