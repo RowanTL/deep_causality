@@ -20,7 +20,7 @@
 //!   packet is dropped. The cumulative drop count crosses the outage
 //!   threshold within a handful of seconds.
 //! * Closed loop. The monitor detects the zero-delivery tick the
-//!   moment it happens and fires `.intervene(STANDBY_SWITCH)` on the
+//!   moment it happens and fires `.alternate_value(STANDBY_SWITCH)` on the
 //!   chain. The next forward stage routes through the standby.
 //!   Traffic is rerouted with at most one tick of loss.
 //!
@@ -61,7 +61,7 @@ fn main() {
     );
 
     println!("\n--- Closed-loop EffectLog (per-tick forwarding + failover event) ---");
-    print_utils::print_effect_log(&closed.logs);
+    print_utils::print_effect_log(closed.logs());
 }
 
 /// Open loop: each tick is just `forward_traffic`, run `N_TICKS` times. No monitor, no failover.
@@ -90,7 +90,7 @@ fn run_closed_loop() -> NetworkProcess<SwitchId> {
                         }
                         state
                     })
-                    .intervene(STANDBY_SWITCH)
+                    .alternate_value(STANDBY_SWITCH)
                 },
                 |cold| cold,
             )

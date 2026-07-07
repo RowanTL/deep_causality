@@ -27,7 +27,7 @@
 //!   envelope and the `EffectLog` records every stop event.
 //!
 //! Same chain, same physics, same starting tissue saturation. The only
-//! difference is whether the corrective `.intervene(0.0)` fires.
+//! difference is whether the corrective `.alternate_value(0.0)` fires.
 
 mod model;
 pub mod model_types;
@@ -53,13 +53,13 @@ fn main() {
     println!(
         "\nThe open-loop ascent crosses the DCS ratio threshold partway\n\
          up. The closed-loop run uses the same physics, but each\n\
-         supersaturation alarm triggers `.intervene(0.0)` on the ascent\n\
+         supersaturation alarm triggers `.alternate_value(0.0)` on the ascent\n\
          command. The diver surfaces with the tissue ratio inside the\n\
          safe envelope."
     );
 
     println!("\n--- Closed-loop EffectLog (per-tick reading + every stop) ---");
-    print_utils::print_effect_log(&closed.logs);
+    print_utils::print_effect_log(closed.logs());
 }
 
 /// Open loop: each tick is just `simulate_step`, run `N_TICKS` times. Continuous ascent, no stops.
@@ -85,7 +85,7 @@ fn run_closed_loop() -> DiveProcess<FloatType> {
                         state.stop_count += 1;
                         state
                     })
-                    .intervene(0.0)
+                    .alternate_value(0.0)
                 },
                 |cold| cold,
             )

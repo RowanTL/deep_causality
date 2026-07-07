@@ -16,21 +16,6 @@ rust_test_suite(
 )
 
 rust_test_suite(
-    name = "hkt",
-    srcs = glob([
-        "hkt/*_tests.rs",
-    ]),
-    tags = [
-        "unit-test",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        # Crate to test
-        "//deep_causality_haft",
-    ],
-)
-
-rust_test_suite(
     name = "effect_system",
     srcs = glob([
         "effect_system/*_tests.rs",
@@ -49,6 +34,42 @@ rust_test_suite(
     name = "extensions",
     srcs = glob([
         "extensions/*_tests.rs",
+    ]),
+    tags = [
+        "unit-test",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # Crate to test
+        "//deep_causality_haft",
+    ],
+)
+
+rust_test_suite(
+    name = "formalization_lean",
+    srcs = glob([
+        "formalization_lean/*_tests.rs",
+    ]),
+    # `free_monad_tests` is gated behind `alloc` (it uses the alloc-only `Free`/`FreeWitness`);
+    # set the feature so it is compiled and run under Bazel, not silently skipped.
+    crate_features = [
+        "std",
+        "alloc",
+    ],
+    tags = [
+        "lean-test",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # Crate to test
+        "//deep_causality_haft",
+    ],
+)
+
+rust_test_suite(
+    name = "hkt",
+    srcs = glob([
+        "hkt/*_tests.rs",
     ]),
     tags = [
         "unit-test",

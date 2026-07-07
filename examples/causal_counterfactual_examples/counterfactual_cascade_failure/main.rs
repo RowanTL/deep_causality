@@ -7,7 +7,7 @@
 //!
 //! A small fluid distribution network, modelled as a stateful
 //! `PropagatingProcess`. The factual chain solves the baseline flows. A
-//! triggering pipe failure goes in as `.intervene(failure)`. From there a
+//! triggering pipe failure goes in as `.alternate_value(failure)`. From there a
 //! cascade loop iterates: re-solve the flow, find pipes that now exceed
 //! their capacity, and apply the next intervention onto the chain that
 //! already carries the previous intervention. The loop stops when a
@@ -15,7 +15,7 @@
 //! cap hits (system collapse).
 //!
 //! In power-grid planning this is called N-k contingency analysis. Here
-//! it is one chain of `.intervene` calls.
+//! it is one chain of `.alternate_value` calls.
 //!
 //! ## What this gets you that a plain re-solve loop does not
 //!
@@ -65,12 +65,11 @@ fn main() {
 }
 
 fn run_factual(cfg: NetworkConfig) -> NetworkProcess<FlowSolution> {
-    NetworkProcess::<Vec<u32>> {
-        value: EffectValue::Value(Vec::new()),
-        state: NetworkState::default(),
-        context: Some(cfg),
-        error: None,
-        logs: EffectLog::new(),
-    }
+    NetworkProcess::<Vec<u32>>::new(
+        Ok(EffectValue::Value(Vec::new())),
+        NetworkState::default(),
+        Some(cfg),
+        EffectLog::new(),
+    )
     .bind(resolve_stage)
 }

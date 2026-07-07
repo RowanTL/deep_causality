@@ -8,7 +8,23 @@
 // =============================================================================
 
 use crate::types::causal_flow::{err_leaf, ok_leaf};
-use crate::{CausalEffectPropagationProcess, CausalFlow, CausalityError};
+use crate::{CausalEffectPropagationProcess, CausalFlow, CausalityError, EffectLog, EffectValue};
+
+impl<Value, State, Context> CausalFlow<Value, State, Context> {
+    /// Build a flow from explicit channels — the general constructor beneath [`value`](CausalFlow::value)
+    /// and [`process`](CausalFlow::process), and the causal arrow's unit `η`:
+    /// `η(a, s, c) = from_parts(Ok(EffectValue::Value(a)), s, c, EffectLog::new())`.
+    pub fn from_parts(
+        outcome: Result<EffectValue<Value>, CausalityError>,
+        state: State,
+        context: Option<Context>,
+        logs: EffectLog,
+    ) -> Self {
+        CausalFlow {
+            inner: CausalEffectPropagationProcess::new(outcome, state, context, logs),
+        }
+    }
+}
 
 impl CausalFlow<(), (), ()> {
     /// Start a stateless flow carrying the unit value (the seed for an effect chain).
@@ -49,13 +65,12 @@ impl<Value, State> CausalFlow<Value, State, ()> {
     pub fn context<Context>(self, context: Context) -> CausalFlow<Value, State, Context> {
         let inner = self.inner;
         CausalFlow {
-            inner: CausalEffectPropagationProcess {
-                value: inner.value,
-                state: inner.state,
-                context: Some(context),
-                error: inner.error,
-                logs: inner.logs,
-            },
+            inner: CausalEffectPropagationProcess::new(
+                inner.outcome,
+                inner.state,
+                Some(context),
+                inner.logs,
+            ),
         }
     }
 }
