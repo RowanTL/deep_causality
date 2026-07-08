@@ -27,6 +27,7 @@ jobs:
         # See issue #536.
         crate:
           - deep_causality
+          - deep_causality_algebra
           - deep_causality_algorithms
           - deep_causality_ast
           - deep_causality_calculus
@@ -42,6 +43,8 @@ jobs:
           - deep_causality_metric
           - deep_causality_multivector
           - deep_causality_num
+          - deep_causality_num_complex
+          - deep_causality_num_dual
           - deep_causality_par
           - deep_causality_physics
           - deep_causality_rand
@@ -61,6 +64,8 @@ jobs:
             extra_flags: -Zmiri-disable-isolation       # clock_gettime in test setup
           - crate: deep_causality_core
             extra_flags: -Zmiri-disable-isolation       # EffectLog::add_entry -> SystemTime::now (log_effect.rs:57)
+          - crate: deep_causality_file
+            extra_flags: -Zmiri-disable-isolation       # Needs file open / write access
           - crate: deep_causality_discovery
             extra_flags: -Zmiri-disable-isolation       # DSL opens files
           - crate: deep_causality_uncertain

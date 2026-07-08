@@ -1,6 +1,6 @@
 [package]
 name = "deep_causality_ast"
-version = "0.1.7"
+version = "0.1.8"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,8 +12,18 @@ documentation = "https://docs.rs/deep_causality"
 categories = ["data-structures", "science"]
 keywords = ["data-structures", "ast"]
 # Exclude all bazel files as these conflict with Bazel workspace when vendored.
-exclude = ["*.bazel", "*/*.bazel",  "*.bazel.*", "BUILD", "BUILD.bazel", "MODULE.bazel", ".bazelignore",".bazelrc", "tests/**/*"]
-
+exclude = [
+    "*.bazel",
+    "*/*.bazel",
+    "*.bazel.*",
+    "BUILD",
+    "BUILD.bazel",
+    "MODULE.bazel",
+    ".bazelignore",
+    ".bazelrc",
+    "tests/**/*",
+    "papers/*",
+]
 
 [lints]
 workspace = true

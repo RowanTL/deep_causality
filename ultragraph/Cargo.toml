@@ -3,7 +3,7 @@
 
 [package]
 name = "ultragraph"
-version = "0.9.1"
+version = "0.9.2"
 edition = { workspace = true }
 rust-version = { workspace = true }
 license = { workspace = true }
@@ -15,8 +15,18 @@ documentation = "https://docs.rs/ultragraph"
 homepage = "https://github.com/deepcausality/deep_causality/tree/main/ultragraph"
 categories = ["data-structures"]
 keywords = ["data-structures"]
-exclude = ["*.bazel", "*/*.bazel", "*.bazel.*", "BUILD", "BUILD.bazel", "MODULE.bazel", ".bazelignore", ".bazelrc", "tests/**/*"]
-
+exclude = [
+    "*.bazel",
+    "*/*.bazel",
+    "*.bazel.*",
+    "BUILD",
+    "BUILD.bazel",
+    "MODULE.bazel",
+    ".bazelignore",
+    ".bazelrc",
+    "tests/**/*",
+    "papers/*",
+]
 
 [dev-dependencies]
 criterion = {  version = "0.8" }

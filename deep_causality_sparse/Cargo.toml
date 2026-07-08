@@ -1,6 +1,6 @@
 [package]
 name = "deep_causality_sparse"
-version = "0.2.0"
+version = "0.2.1"
 edition = { workspace = true }
 rust-version = { workspace = true }
 license = { workspace = true }
@@ -25,7 +25,7 @@ exclude = [
 
 [features]
 default = ["std"]
-std = ["deep_causality_num/default"]
+std = ["deep_causality_num/default", "deep_causality_algebra/default"]
 # Opt-in: enables CausalTensor <-> CsrMatrix iso (forward `From`,
 # reverse Tier 2 `Iso`, inherent `to_dense()` alias). Pulls in
 # `deep_causality_tensor` as a transitive dependency. Off by default
@@ -35,16 +35,21 @@ tensor-iso = ["dep:deep_causality_tensor"]
 
 [dependencies.deep_causality_num]
 path = "../deep_causality_num"
-version = "0.3"
+version = "0.4"
+default-features = false
+
+[dependencies.deep_causality_algebra]
+path = "../deep_causality_algebra"
+version = "0.1"
 default-features = false
 
 [dependencies.deep_causality_haft]
 path = "../deep_causality_haft"
-version = "0.3"
+version = "0.4"
 
 [dependencies.deep_causality_tensor]
 path = "../deep_causality_tensor"
-version = "0.4"
+version = "0.5"
 default-features = false
 optional = true
 
