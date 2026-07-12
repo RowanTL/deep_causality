@@ -33,6 +33,8 @@
             pkg-config
             jetbrains.rust-rover
             curl
+
+            # For lean verification
             lean.lean-all
 
             # cargo programs
@@ -41,6 +43,9 @@
             cargo-udeps
             cargo-audit
             cargo-machete
+
+            # Needed for building the website
+            nodejs
           ];
 
           shellHook = ''
