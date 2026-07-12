@@ -1,14 +1,15 @@
 allowBuilds:
   esbuild: true
   sharp: true
-  # Required so `wrangler deploy` can run its packaging step under pnpm 11.
   workerd: true
-
-minimumReleaseAgeExclude:
-  - astro-mermaid@2.1.0
-
-# Force-patch transitive deps that ship with known CVEs. Remove an entry
-# once the parent dependency upstream bumps the pinned version.
-overrides:
-  devalue: ^5.8.1
-  yaml: ^2.8.3
+# pnpm settings live here, not in package.json.
+#
+# pnpm 11 no longer reads the `pnpm` field from package.json (it warns
+# "The 'pnpm' field in package.json is no longer read by pnpm"). The
+# build-script allowlist that lets these native deps run their install
+# scripts must therefore be declared here. Without it, `pnpm install`
+# aborts on Cloudflare with ERR_PNPM_IGNORED_BUILDS.
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - workerd
