@@ -46,6 +46,9 @@
 
             # Needed for building the website
             nodejs
+
+            # For AI agents and such
+            openspec
           ];
 
           shellHook = ''
