@@ -49,6 +49,9 @@
 
             # For AI agents and such
             openspec
+
+            # Other build tools
+            bazel-buildtools
           ];
 
           shellHook = ''
