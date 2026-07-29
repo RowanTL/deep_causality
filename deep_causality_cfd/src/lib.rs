@@ -46,7 +46,7 @@ pub use crate::traits::{
     CfdScalar, FluidTheory, MarchDispatch, Marchable, Marcher, MetricProvider, MetricProvider3d,
     Solver,
 };
-pub use crate::types::Ambient;
+pub use crate::types::{Ambient, EvidenceClass, KeyedInterpolation, KeyedTable, LadderOutcome};
 
 // The CFD ↔ tensor-network (QTT) bridge: quantized field codec and finite-difference MPO assembly.
 pub use crate::coordinate::{
@@ -57,7 +57,7 @@ pub use crate::tensor_bridge::{
     AcousticCoreInverse, AcousticCoreInverse2d, AcousticCoreInverse3d, QttProjector2d,
     body_mask_2d, dequantize, dequantize_2d, dequantize_3d, divergence_3d, gradient, gradient_x,
     gradient_x_3d, gradient_y, gradient_y_3d, gradient_z_3d, laplacian, laplacian_2d, laplacian_3d,
-    mask_from_fn, quantize, quantize_2d, quantize_3d, shift_minus, shift_plus,
+    mask_from_fn, plume_mask_2d, quantize, quantize_2d, quantize_3d, shift_minus, shift_plus,
 };
 
 // GNSS-denial navigation (aerospace-engineering estimation layer composing the physics kernels):
@@ -89,14 +89,19 @@ pub use deep_causality_file::{
 
 pub use crate::types::flow::{
     AeroBlackoutStub, AeroForceCoupling, BankCorrection, BankSteeredLift, BlackoutState,
-    BlackoutTrigger, BranchAccumulator, BranchOutcome, CfdFlow, CompressibleFork,
+    BlackoutTrigger, BranchAccumulator, BranchOutcome, BurnEnvelope, CfdFlow, CompressibleFork,
     CompressibleMarchRun, CompressiblePause, CoupledField, CoupledMarch, Coupling,
-    CyberneticCorrect, DuctMarchRun, EosStage, FiniteRateIonizationStage, Gates, GoverningModel,
-    IonizationStage, MarchFork, MarchPause, MarchPipeline, MarchRun, MarchState, MmsBuilder,
-    Operator, OperatorStudyBuilder, PhysicsStage, QttMarchRun, QttStepView, ReadyMarch,
-    RecoveryTemperatureStage, Regime, RegimeClass, RegimeClassify, Report, SafetyEnvelope,
+    CyberneticCorrect, DuctMarchRun, EosStage, FiniteRateIonizationStage, FlightSensors,
+    ForkEconomics, Gates, GoverningModel, IGNITION_COMMIT_AIDED_FIELD, IGNITION_COMMIT_MACH_FIELD,
+    IGNITION_COMMIT_Q_FIELD, IGNITION_COMMIT_SIGMA_FIELD, IGNITION_COMMIT_STEP_FIELD,
+    IGNITION_LATCH_FIELD, IgnitionCorridor, IonizationStage, LEG_RE_SEEDS_FIELD, MachRegime,
+    MarchFork, MarchPause, MarchPipeline, MarchRun, MarchState, MmsBuilder, Operator,
+    OperatorStudyBuilder, PRESERVED_DRAG_FRACTION_FIELD, PhysicsStage, PlumeNozzle,
+    PlumeObstruction, PropulsionStub, QttMarchRun, QttStepView, REGIME_TRANSITIONS_FIELD,
+    ReadyMarch, RecoveryTemperatureStage, Regime, RegimeClass, RegimeClassify, Report, RetroThrust,
+    STOPPING_BURN_ALTITUDE_FIELD, STOPPING_BURN_FIELD, STOPPING_BURN_SPEED_FIELD, SafetyEnvelope,
     StepContext, StepView, StudyEffect, StudyEffectWitness, StudyError, StudyWarning,
-    StudyWarningLog, ThermalRelax, TrajectoryNav,
+    StudyWarningLog, ThermalRelax, ThrottleGuidance, ThrustState, TrajectoryNav,
 };
 pub use crate::types::flow::{
     Alternated, Branched, CaseRun, Cases, Configured, Counterfactual, CoupledCampaign,
@@ -109,8 +114,8 @@ pub use crate::types::flow::{
 pub use crate::types::flow_config::{
     AtmosphereRow, Body, CfdConfigBuilder, CompressibleMarchConfig, CompressibleMarchConfigBuilder,
     DescentSchedule, DuctAreaProfile, DuctConfig, DuctInlet, DuctStop, Grading, Manufactured,
-    ManufacturedSample, MarchConfig, MarchConfigBuilder, MarchStop, Mesh, Observe, QttBody,
-    QttMarchConfig, QttMarchConfigBuilder, QttObserve, ReferenceScales, Seed, TaylorGreen,
+    ManufacturedSample, MarchConfig, MarchConfigBuilder, MarchStop, Mesh, Observe, PlumeImprint,
+    QttBody, QttMarchConfig, QttMarchConfigBuilder, QttObserve, ReferenceScales, Seed, TaylorGreen,
     VerifyConfig, VerifyConfigBuilder,
 };
 // IO effect: the `IoAction` trait (from haft), so a `CfdFlow` program can describe and run file
@@ -135,14 +140,16 @@ pub use crate::solvers::{
     AcousticImex1d, CompressibleEuler1d, CompressibleMarcher2d, CompressibleMarcher3d,
     CompressibleMarcher3dFitted, DecNs, DecNsConfig, DecNsConfigNeedsTimeStep,
     DecNsConfigNeedsViscosity, DecNsConfigReady, EulerState, EulerState2d, EulerState3d,
-    EulerStateTt2d, EulerStateTt3d, FittedNormalShock, Park2tClosure, PostShockState,
-    QttImmersed2d, QttIncompressible2d, QttLinear1d, StagnationOutcome, conservation_round,
-    ideal_gas_pressure, ideal_gas_pressure_2d, positivity_floor,
+    EulerStateTt2d, EulerStateTt3d, FittedNormalShock, ForcingRegion, Park2tClosure,
+    PostShockState, QttImmersed2d, QttIncompressible2d, QttLinear1d, REDUCED_MASS_AMU,
+    StagnationOutcome, conservation_round, ideal_gas_pressure, ideal_gas_pressure_2d,
+    positivity_floor, reduced_mass_amu,
 };
 
 // QTT rollout observable extraction (tensor-train-native diagnostics + surface observables).
 pub use crate::solvers::{
-    divergence_residual, drag_lift, kinetic_energy, max_bond, max_speed, wall_heat_flux,
+    divergence_residual, drag_lift, kinetic_energy, max_bond, max_speed,
+    penalization_heat_integral, preserved_drag_fraction, strip_pressure_force,
 };
 
 // Public API of the Navier–Stokes solver.

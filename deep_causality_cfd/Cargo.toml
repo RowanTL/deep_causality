@@ -28,14 +28,14 @@ exclude = [
     "papers/*",
 ]
 
-# Do not publish to crates.io
+# Put crates.io publication on hold until the internal validation has been completed.
 publish = false
 
 [package.metadata.docs.rs]
 all-features = true
 
 [features]
-default = ["std"]
+default = ["std", "parallel"]
 
 # This crate is std-only
 std = [
@@ -148,6 +148,10 @@ name = "dec_lid_cavity_re1000_verification"
 path = "verification/dec_lid_cavity_re1000_verification/main.rs"
 
 [[example]]
+name = "dec_wall_heat_flux_verification"
+path = "verification/dec_wall_heat_flux_verification/main.rs"
+
+[[example]]
 name = "dec_graded_mms_verification"
 path = "verification/dec_graded_mms_verification/main.rs"
 
@@ -189,7 +193,13 @@ path = "verification/qtt_blunt_body_2d/main.rs"
 name = "qtt_reentry_3d"
 path = "verification/qtt_reentry_3d/main.rs"
 
-# Tier-B rank studies: empirical tests of the "flowfield is low tensor-train rank" thesis.
+# Studies: empirical tests of the "flowfield is low tensor-train rank" thesis.
+
+# Compressible-carrier timing: Task 0 of add-compressible-blackout-carrier (go/no-go grid pick).
+[[example]]
+name = "compressible_carrier_timing"
+path = "studies/compressible_carrier_timing/main.rs"
+
 [[example]]
 name = "qtt_rank_study"
 path = "studies/qtt_rank_study/main.rs"
@@ -205,11 +215,6 @@ path = "studies/qtt_rank_nonlinear/main.rs"
 [[example]]
 name = "qtt_rank_3d"
 path = "studies/qtt_rank_3d/main.rs"
-
-# Compressible-carrier timing: Task 0 of add-compressible-blackout-carrier (go/no-go grid pick).
-[[example]]
-name = "compressible_carrier_timing"
-path = "studies/compressible_carrier_timing/main.rs"
 
 # Round-2 studies: de-risk the resolution-4/5/6 design nodes before the compressible build.
 [[example]]
@@ -227,6 +232,17 @@ path = "studies/qtt_blend_metric/main.rs"
 [[example]]
 name = "qtt_repin_marcher"
 path = "studies/qtt_repin_marcher/main.rs"
+
+# Plume rank + fork economics: the plasma-retropulsion de-risk study (roadmap M1 risks 2 + 3).
+[[example]]
+name = "qtt_rank_plume"
+path = "studies/qtt_rank_plume/main.rs"
+
+# Momentum-jet follow-up: does a momentum-carrying jet (formed plume)
+# recover the Jarvinen-Adams collapse the pinned-envelope imprint could not?
+[[example]]
+name = "srp_momentum_jet"
+path = "studies/srp_momentum_jet/main.rs"
 
 # Gap-3 trajectory-axis feasibility studies: de-risk Resolution-1's perturbed-conformal split (the
 # generator, the aero-coupling law, the relativistic clock) before specifying the trajectory propagator.

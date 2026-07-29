@@ -146,6 +146,7 @@ rust_test(
         # Crate to test
         "//deep_causality_cfd",
         # Internal dependencies
+        "//deep_causality_algebra",
         "//deep_causality_calculus",
         "//deep_causality_core",
         "//deep_causality_haft",
@@ -232,9 +233,9 @@ rust_test(
 
 rust_test(
     name = "types",
-    srcs = glob([
-        "types/*_tests.rs",
-    ]),
+    srcs = [
+        "types/ambient_tests.rs",
+    ],
     crate_features = [
         "std",
     ],
@@ -250,10 +251,69 @@ rust_test(
 )
 
 rust_test(
+    name = "types_keyed_table",
+    srcs = [
+        "types/keyed_table_tests.rs",
+    ],
+    crate_features = [
+        "std",
+    ],
+    crate_root = "types/keyed_table_tests.rs",
+    tags = [
+        "unit-test",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # Crate to test
+        "//deep_causality_cfd",
+    ],
+)
+
+rust_test(
+    name = "types_evidence_class",
+    srcs = [
+        "types/evidence_class_tests.rs",
+    ],
+    crate_features = [
+        "std",
+    ],
+    crate_root = "types/evidence_class_tests.rs",
+    tags = [
+        "unit-test",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # Crate to test
+        "//deep_causality_cfd",
+    ],
+)
+
+rust_test(
+    name = "types_ladder_outcome",
+    srcs = [
+        "types/ladder_outcome_tests.rs",
+    ],
+    crate_features = [
+        "std",
+    ],
+    crate_root = "types/ladder_outcome_tests.rs",
+    tags = [
+        "unit-test",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # Crate to test
+        "//deep_causality_cfd",
+    ],
+)
+
+rust_test(
     name = "types_flow",
     srcs = glob([
         "types/flow/**/*_tests.rs",
     ]) + [
+        "types/flow/compressible_march_run/mod.rs",
+        "types/flow/corridor/mod.rs",
         "types/flow/mod.rs",
     ],
     crate_features = [
