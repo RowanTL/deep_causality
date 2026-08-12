@@ -320,6 +320,20 @@ bazel build //...
 bazel test  //...
 ```
 
+Every example is a Bazel binary — except `example_ml_rca` in `causal_discovery_examples`, which is
+deliberately Cargo-only (it is listed in `CARGO_ONLY` in `build/scripts/check_examples.sh`, so the
+example-coverage check does not expect a Bazel target for it). The two commands in the
+[Examples](#examples) section above therefore have Bazel equivalents:
+
+```bash
+bazel run //examples/physics_examples:event_horizon_probe
+bazel run //examples/avionics_examples:flight_envelope_monitor
+```
+
+Examples that read bundled data or record an output table resolve those paths against the
+workspace root, so they read and write the same files under either build system.
+`make check_examples` verifies that no Cargo example is missing its Bazel target.
+
 ---
 
 ## Contributing
@@ -378,9 +392,6 @@ Implemented research:
 
 ---
 
-## License
-
-This project is licensed under the [MIT license](LICENSE).
 
 ## 👮 Security
 
@@ -392,7 +403,7 @@ See [SECURITY.md](SECURITY.md) for security policies.
 
 [![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
 
-[JetBrains](https://www.jetbrains.com/) provides the project with an all-product license.
+[JetBrains](https://www.jetbrains.com/) provides project core maintainers with an all-product license.
 
 <a href="https://www.causalcenter.com">
   <picture>
@@ -406,30 +417,6 @@ The [Center for Dynamic Causality](https://www.causalcenter.com) contributes ong
 
 ---
 
-## Citation
+## License
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20195214.svg)](https://doi.org/10.5281/zenodo.20195214)
-
-If you use DeepCausality in your research, please cite it using the metadata in [`CITATION.cff`](CITATION.cff), or
-directly as follows.
-
-**APA:**
-
-> Hansen, M. (2026). *DeepCausality* [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.20195214
-
-**BibTeX:**
-
-```bibtex
-@software{hansen_deepcausality,
-    author = {Hansen, Marvin},
-    title = {DeepCausality: A Hypergeometric Computational Causality Library for Rust},
-    publisher = {Zenodo},
-    url = {https://github.com/deepcausality-rs/deep_causality},
-    doi = {10.5281/zenodo.20195214},
-    orcid = {0009-0000-1159-8173}
-}
-```
-
-The DOI above represents all versions, and will always
-resolve to the latest one. To cite a specific release, use the version-specific DOI listed on the
-project's [Zenodo record](https://doi.org/10.5281/zenodo.20195214).
+This project is licensed under the [MIT license](LICENSE).

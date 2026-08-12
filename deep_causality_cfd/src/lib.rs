@@ -19,8 +19,11 @@
 //! scalar (`CfdScalar`). Composition is static (no `dyn`),
 //! built on the `deep_causality_haft` HKT/algebra foundation.
 //!
-//! CPU parallelism is opt-in via the `parallel` feature
-//! and rides the `MaybeParallel` bound.
+//! CPU parallelism ships on: `parallel` sits in the crate's `default` feature
+//! set and rides the `MaybeParallel` bound. Build with
+//! `--no-default-features --features std` for the serial operator loops, which
+//! are the faster choice below roughly 256² cells
+//! (see `benches/PERFORMANCE.md`).
 
 extern crate alloc;
 
@@ -50,8 +53,8 @@ pub use crate::types::{Ambient, EvidenceClass, KeyedInterpolation, KeyedTable, L
 
 // The CFD ↔ tensor-network (QTT) bridge: quantized field codec and finite-difference MPO assembly.
 pub use crate::coordinate::{
-    BlendedMap, BlendedMapConfig, BodyFittedCoordinate, BodyFittedCoordinate3d, CartesianIdentity,
-    CartesianIdentity3d,
+    BlendedMap, BlendedMapConfig, BlendedMapConfigBuilder, BodyFittedCoordinate,
+    BodyFittedCoordinate3d, CartesianIdentity, CartesianIdentity3d,
 };
 pub use crate::tensor_bridge::{
     AcousticCoreInverse, AcousticCoreInverse2d, AcousticCoreInverse3d, QttProjector2d,
@@ -66,6 +69,8 @@ pub use crate::navigation::{
     ImuModel, InsErrorState, IntegratorRegime, NAV_STATES, NavFilter, ReentryNavEngine,
     RegimeSwitch, aero_gravity_ratio, nav_transition_matrix,
 };
+// The nominal attitude representation `ReentryNavEngine` carries and returns (`attitude()` / `restore`).
+pub use deep_causality_num_complex::Quaternion;
 
 // The CfdFlow DSL facade (owned case descriptions materialized at run).
 // Workflow composition — the CfdFlow DSL (the "how").
@@ -92,7 +97,7 @@ pub use crate::types::flow::{
     BlackoutTrigger, BranchAccumulator, BranchOutcome, BurnEnvelope, CfdFlow, CompressibleFork,
     CompressibleMarchRun, CompressiblePause, CoupledField, CoupledMarch, Coupling,
     CyberneticCorrect, DuctMarchRun, EosStage, FiniteRateIonizationStage, FlightSensors,
-    ForkEconomics, Gates, GoverningModel, IGNITION_COMMIT_AIDED_FIELD, IGNITION_COMMIT_MACH_FIELD,
+    ForkEconomics, GoverningModel, IGNITION_COMMIT_AIDED_FIELD, IGNITION_COMMIT_MACH_FIELD,
     IGNITION_COMMIT_Q_FIELD, IGNITION_COMMIT_SIGMA_FIELD, IGNITION_COMMIT_STEP_FIELD,
     IGNITION_LATCH_FIELD, IgnitionCorridor, IonizationStage, LEG_RE_SEEDS_FIELD, MachRegime,
     MarchFork, MarchPause, MarchPipeline, MarchRun, MarchState, MmsBuilder, Operator,
@@ -113,9 +118,9 @@ pub use crate::types::flow::{
 // Configuration — CfdConfigBuilder + the owned config containers / scenario types (the "what").
 pub use crate::types::flow_config::{
     AtmosphereRow, Body, CfdConfigBuilder, CompressibleMarchConfig, CompressibleMarchConfigBuilder,
-    DescentSchedule, DuctAreaProfile, DuctConfig, DuctInlet, DuctStop, Grading, Manufactured,
+    DescentSchedule, DuctAreaProfile, DuctConfig, DuctConfigBuilder, Grading, Manufactured,
     ManufacturedSample, MarchConfig, MarchConfigBuilder, MarchStop, Mesh, Observe, PlumeImprint,
-    QttBody, QttMarchConfig, QttMarchConfigBuilder, QttObserve, ReferenceScales, Seed, TaylorGreen,
+    QttMarchConfig, QttMarchConfigBuilder, QttObserve, ReferenceScales, Seed, TaylorGreen,
     VerifyConfig, VerifyConfigBuilder,
 };
 // IO effect: the `IoAction` trait (from haft), so a `CfdFlow` program can describe and run file
@@ -138,12 +143,11 @@ pub use crate::theories::*;
 // Solver configuration + type-state builder.
 pub use crate::solvers::{
     AcousticImex1d, CompressibleEuler1d, CompressibleMarcher2d, CompressibleMarcher3d,
-    CompressibleMarcher3dFitted, DecNs, DecNsConfig, DecNsConfigNeedsTimeStep,
-    DecNsConfigNeedsViscosity, DecNsConfigReady, EulerState, EulerState2d, EulerState3d,
-    EulerStateTt2d, EulerStateTt3d, FittedNormalShock, ForcingRegion, Park2tClosure,
-    PostShockState, QttImmersed2d, QttIncompressible2d, QttLinear1d, REDUCED_MASS_AMU,
-    StagnationOutcome, conservation_round, ideal_gas_pressure, ideal_gas_pressure_2d,
-    positivity_floor, reduced_mass_amu,
+    CompressibleMarcher3dFitted, DecNsConfig, DecNsConfigNeedsTimeStep, DecNsConfigNeedsViscosity,
+    DecNsConfigReady, EulerState, EulerState2d, EulerState3d, EulerStateTt2d, EulerStateTt3d,
+    FittedNormalShock, ForcingRegion, Park2tClosure, PostShockState, QttImmersed2d,
+    QttIncompressible2d, QttLinear1d, REDUCED_MASS_AMU, StagnationOutcome, conservation_round,
+    ideal_gas_pressure, ideal_gas_pressure_2d, positivity_floor, reduced_mass_amu,
 };
 
 // QTT rollout observable extraction (tensor-train-native diagnostics + surface observables).

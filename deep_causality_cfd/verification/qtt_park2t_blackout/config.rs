@@ -15,8 +15,8 @@
 
 use crate::FloatType;
 use deep_causality_cfd::{
-    BlackoutTrigger, Coupling, EosStage, IonizationStage, MarchStop, PhysicsError, PhysicsStage,
-    QttMarchConfig, QttMarchConfigBuilder, QttObserve, RecoveryTemperatureStage, body_mask_2d,
+    BlackoutTrigger, CfdConfigBuilder, Coupling, EosStage, IonizationStage, MarchStop,
+    PhysicsError, PhysicsStage, QttMarchConfig, QttObserve, RecoveryTemperatureStage, body_mask_2d,
 };
 use deep_causality_num::FromPrimitive;
 use deep_causality_tensor::{CausalTensorTrain, Truncation};
@@ -27,13 +27,21 @@ pub const NU: f64 = 0.05;
 pub const DT: f64 = 0.004;
 /// Marched relaxation steps (the LER ionization dwell).
 pub const STEPS: usize = 40;
-/// Brinkman penalization parameter (small → hard wall).
+/// Brinkman penalization parameter (small → hard wall). Pinned by the explicit-stability ratio
+/// `dt/η = 0.25` (`dt = 0.004`), not a wall-error target. This harness gates the LER ionization
+/// criteria (electron density, blackout), not drag, so the penalization-layer resolution `√(ην)` is
+/// not a gated accuracy lever here. If a drag or wall-quantity gate is added, re-derive `η` from the
+/// resolution constraint `η ≥ dx²/ν`, as `qtt_cylinder_verification` does (`close-qtt-solver-envelope`).
 pub const ETA: f64 = 0.016;
 /// Free-stream speed of the incompressible carrier (the reconstruction rides this field).
 pub const U_INF: f64 = 1.0;
 /// Forebody radius as a fraction of the box length `2π`.
 pub const RADIUS_FRAC: f64 = 0.18;
-/// Mask smoothing width in cells.
+/// Mask smoothing width in cells: the `tanh` forebody mask transitions over `SMOOTH_CELLS·dx`. This
+/// is a numerical regularization parameter, not a physical constant. The value 2.0 spreads the
+/// transition over more than one cell; a one-cell step aliases. This harness gates the LER ionization
+/// criteria, not drag, so the mask width is not a gated accuracy lever here. See the
+/// `qtt_cylinder_verification` `SMOOTH_CELLS` note and AUDIT-REPORT §4b, §5b for its drag sensitivity.
 pub const SMOOTH_CELLS: f64 = 2.0;
 
 // ── Flight condition (RAM-C-like reentry) ────────────────────────────────
@@ -95,8 +103,7 @@ pub fn build_config(l: usize, cap: usize) -> Result<QttMarchConfig<FloatType>, P
     let trunc = trunc_bond(cap);
     let mask = body_mask(l, &trunc)?;
     let u_inf = ft(U_INF);
-    QttMarchConfigBuilder::<FloatType>::new()
-        .name("qtt-park2t-blackout")
+    CfdConfigBuilder::qtt_march::<FloatType>("qtt-park2t-blackout")
         .grid(l, l, dx, dx)
         .solver(ft(DT), ft(NU), trunc)
         .seed_fn(|_, _| (u_inf, ft(0.0)))?

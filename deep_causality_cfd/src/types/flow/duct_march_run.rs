@@ -175,8 +175,10 @@ impl<'a, R: CfdScalar> DuctMarchRun<'a, R> {
 
             // Conservative update `u_i ← u_i − Δt/(Δx·A_i)·(F_{i+1/2} − F_{i−1/2})
             // + Δt·s_i/A_i` with the pressure area-source
-            // `s_i = p_i·(A_{i+1/2} − A_{i−1/2})/Δx`; for a uniform state the
-            // source cancels the flux difference exactly (well-balanced).
+            // `s_i = p_i·(A_{i+1/2} − A_{i−1/2})/Δx`; for a **stagnant** uniform state (u = 0) the
+            // source cancels the flux difference exactly (well-balanced). The cancellation is exact
+            // only at rest: with u ≠ 0 the momentum flux difference is not a pure pressure term, so a
+            // uniform moving state is not preserved to round-off by this discretization.
             let mut new_cons = Vec::with_capacity(n);
             let mut max_delta = [R::zero(); 3];
             let mut max_scale = [R::zero(); 3];
@@ -304,7 +306,7 @@ impl<'a, R: CfdScalar> DuctMarchRun<'a, R> {
         let a_star = cfg.profile.min_area();
         let cf = (exit.rho * exit.u * exit.u + (exit.p - pb)) * a_exit / a_star;
 
-        let mut report = Report::new("duct_march");
+        let mut report = Report::new(cfg.name());
         report.add_series("x", x_centers.to_vec());
         report.add_series("mach_profile", mach);
         report.add_series("pressure_profile", pressure);

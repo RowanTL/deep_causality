@@ -12,7 +12,7 @@ hostname.
 | --- | --- | --- | --- | --- |
 | [`web/`](./web) | Website (home, blog, examples, short getting-started/overview) | Astro (custom) | `deepcausality-prod` | https://www.deepcausality.com |
 | [`docs/`](./docs) | Reference documentation (concepts, guides, overview, single-PDF export) | [Starlight](https://starlight.astro.build) on Astro | `deepcausality-docs` | https://docs.deepcausality.com |
-| [`cfd/`](./cfd) | `deep_causality_cfd`: blueprints, validation status, worked examples, capability boundaries | Astro (custom) | `deepcausality-cfd-prod` | https://cfd.deepcausality.com |
+| [`cfd/`](./cfd) | `deep_causality_cfd`: blueprints, validation status, worked examples, capability boundaries | Astro (custom) | `deep-causality-cfd-prod` | https://cfd.deepcausality.com |
 
 A fourth directory, [`web_design/`](./web_design), is documentation rather
 than a site: it describes the shipped visual system as implemented. The binding
@@ -67,7 +67,7 @@ its `node_modules` path is listed in `.bazelignore`.
 
 ## Toolchain constraints
 
-Two pins are deliberate and should not be "fixed" by a routine upgrade.
+Three pins are deliberate and should not be "fixed" by a routine upgrade.
 
 **TypeScript stays on the 6 line.** TypeScript 7.0 dropped the programmatic API
 that `@astrojs/check` uses, so `pnpm check` fails on 7.x
@@ -79,6 +79,12 @@ All three projects pin `typescript` to `^6.0.3`.
 pnpm resolves two copies. Bazel's `public_hoist_packages` cannot hoist an
 ambiguous name and fails the build. Each project therefore forces one version in
 its `pnpm-workspace.yaml`.
+
+**`shiki` is pinned in `cfd/`.** `cfd/shiki-rust-themes.mjs` derives the site's
+Rust themes from the `bundledThemes` of the project's own `shiki`, while astro
+highlights with whatever its `^4.0.2` dependency resolves to. Left free, pnpm
+keeps two copies and the derived themes cross a version boundary, so
+`cfd/pnpm-workspace.yaml` forces one.
 
 Note that pnpm 11 no longer reads the `pnpm` field from `package.json`, so
 `overrides` and `onlyBuiltDependencies` must live in `pnpm-workspace.yaml`. An
@@ -92,6 +98,33 @@ All three sites are fully static and deployed as Cloudflare Workers Static Asset
 
 Custom domains are bound in the Cloudflare dashboard. Per-origin caching and
 security headers are configured via each project's `public/_headers` file.
+
+Each Worker's build configuration lives in the Cloudflare dashboard:
+
+| Setting | Value |
+| --- | --- |
+| Root directory | `/website/<project>/` |
+| Build command | `pnpm run build` |
+| Deploy command | `npx wrangler deploy` |
+
+Two of these fail quietly, and both cost a debugging session on `cfd/`.
+
+**An empty build command does not fail the build.** Cloudflare installs
+dependencies by itself, so the build step reports success, and the run dies
+later in the deploy with `The directory specified by the "assets.directory"
+field in your configuration file does not exist`, because nothing produced
+`dist/`. `cfd/wrangler.toml` therefore carries its own `[build]` command;
+wrangler runs it before reading `assets.directory`, so the dashboard field is
+belt-and-braces there rather than load-bearing. `web/` and `docs/` still rely
+on the dashboard field alone.
+
+**A wrong Worker name does not fail either.** `wrangler deploy` takes the name
+from `wrangler.toml`, so a name that does not match the Worker the build is
+attached to creates a second Worker with no custom domain bound, then reports
+success while the live site stays unchanged. Note that the three names do not
+follow one convention: `deepcausality-prod`, `deepcausality-docs`, and
+`deep-causality-cfd-prod`, the last hyphenated throughout. Match the dashboard,
+not the pattern.
 
 ## License
 

@@ -23,11 +23,18 @@
 //! branch's flow through the model. Measured: (a) fork structure — every branch shares the
 //! paused fluid and field by reference (O(1) copy-on-write), a hard gate; (b) per-branch
 //! continuation wall-clock against an unforked trunk continuation (recorded; band pinned from
-//! the first run); (c) post-fork bond growth on a **mirrored** continuation (the pause hides
-//! its fluid tensors, so the mirror re-marches the identical deterministic path on the bare
-//! marcher — same seed, same steps, same round policy — and reads the bond there); (d) the
-//! branch flow observables spread across the roster (the corridor's branch-invariant flow
-//! columns are the explicit foil).
+//! the first run); (c) post-fork bond growth on a **mirrored** continuation; (d) the branch flow
+//! observables spread across the roster (the corridor's branch-invariant flow columns are the
+//! explicit foil).
+//!
+//! **What the mirror is, and is not.** The pause hides its fluid tensors, so measurement (c) is
+//! read off a stand-in: a bare-marcher run that re-marches `K_PAUSE` steps from the freestream
+//! seed at the same `dt`, tolerance and round policy, then continues each roster entry under that
+//! branch's own plume region. It is deterministic, but it is not the carrier's trajectory. Its
+//! pre-pause segment marches no plume where the carrier trunk (`CT_TRUNK` = 1) does, and it
+//! applies the sponge and body regions every step where a `CompressibleMarchConfig` world applies
+//! only its single optional forcing region. Nothing compares an observable between the mirror and
+//! the pause before the bond is read, so the reported post-fork bond is the mirror's.
 //!
 //! Degraded-but-measured outcomes (a poor step-cost ratio, rank viable only under the blend
 //! metric) are printed as findings for the verdict note — only structural breaks (fork sharing
@@ -39,10 +46,9 @@
 //! ```
 
 use deep_causality_cfd::{
-    Ambient, BlackoutTrigger, BlendedMap, BlendedMapConfig, CartesianIdentity, CfdFlow,
-    CompressibleMarchConfig, CompressibleMarchConfigBuilder, CompressibleMarcher2d, CoupledField,
-    EulerStateTt2d, ForcingRegion, MarchStop, QttObserve, ReferenceScales, plume_mask_2d,
-    quantize_2d,
+    Ambient, BlackoutTrigger, BlendedMap, BlendedMapConfig, CartesianIdentity, CfdConfigBuilder,
+    CfdFlow, CompressibleMarchConfig, CompressibleMarcher2d, CoupledField, EulerStateTt2d,
+    ForcingRegion, MarchStop, QttObserve, plume_mask_2d, quantize_2d,
 };
 use deep_causality_physics::{
     Area, Force, Length, PlumeGeometry, Pressure, Temperature, area_mach_ratio_kernel,
@@ -255,7 +261,10 @@ fn main() {
         ));
     }
 
-    // (c) Post-fork bond growth, on the mirrored (bit-identical, deterministic) continuation.
+    // (c) Post-fork bond growth on the mirror. Deterministic under the fixed seed and step order,
+    // but not the carrier's path: the pre-pause segment below marches no plume where the trunk
+    // world does, it adds sponge and body every step, and no observable is compared against the
+    // pause before the bond is read. The bond printed here is the mirror's, not the fork's.
     println!("\n    mirrored post-fork bond (bare marcher, same seed/steps/round policy):");
     println!("    throttle | peak bond through continuation");
     println!("    ---------+-------------------------------");
@@ -422,8 +431,7 @@ fn branch_world(name: &'static str, ct: f64) -> Result<CompressibleMarchConfig<f
     let trunc = Truncation::<f64>::by_tol(TOL).map_err(|e| format!("trunc: {e:?}"))?;
     let dx = 1.0 / (1usize << L) as f64;
     let p_inf_hat = p_hat(P_INF);
-    let mut builder = CompressibleMarchConfigBuilder::<f64>::new()
-        .name(name)
+    let mut builder = CfdConfigBuilder::compressible_march::<f64>(name)
         .grid(L, L, dx, dx)
         .solver(DT, S_REF, GAMMA_INF, trunc)
         .flight_dt(0.05)
@@ -431,11 +439,7 @@ fn branch_world(name: &'static str, ct: f64) -> Result<CompressibleMarchConfig<f
         .map_err(|e| format!("seed: {e:?}"))?
         .stop(MarchStop::Fixed(K_PAUSE + CONT))
         .observe(QttObserve::default())
-        .reference(ReferenceScales {
-            t_ref: 1.0,
-            n_ref: 1.0,
-            u_ref: 1.0,
-        })
+        .reference(1.0, 1.0, 1.0)
         .publish_constant("commanded_throttle", ct);
     if ct > 0.0 {
         let (_, geometry, jet) = throttle_point(ct)?;
@@ -474,8 +478,9 @@ fn mirror_seed() -> [CausalTensor<f64>; 4] {
 }
 
 /// March `steps` on the bare marcher with sponge + body always on and an optional plume region;
-/// return the final state and the peak bond. Deterministic: the Phase-B mirror re-runs the
-/// carrier's exact path (same seed, same order of operations, same round policy).
+/// return the final state and the peak bond. Deterministic under a fixed seed and step order. It
+/// is not the carrier's operator sequence: a `CompressibleMarchConfig` world applies one optional
+/// forcing region per step and carries neither a sponge nor a body.
 fn mirror_march(
     plume: Option<&ForcingRegion<f64>>,
     steps: usize,
@@ -578,7 +583,13 @@ fn proxy_bond(geometry: &PlumeGeometry<f64>, lambda: f64) -> Result<usize, Strin
     const DTHETA: f64 = std::f64::consts::PI / 2.0;
     let l = 6usize;
     let side = 1usize << l;
-    let cfg = BlendedMapConfig::new(l, l, R0, DR, -DTHETA / 2.0, DTHETA, lambda);
+    let cfg = BlendedMapConfig::builder()
+        .lattice(l, l)
+        .radial_range(R0, DR)
+        .angular_range(-DTHETA / 2.0, DTHETA)
+        .lambda(lambda)
+        .build()
+        .map_err(|e| format!("blend config: {e:?}"))?;
     let trunc = Truncation::<f64>::by_tol(TOL).map_err(|e| format!("trunc: {e:?}"))?;
     let map = BlendedMap::new(cfg, trunc).map_err(|e| format!("map: {e:?}"))?;
 

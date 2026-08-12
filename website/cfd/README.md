@@ -23,6 +23,17 @@ The Bazel target is wired: `@npm_cfd` is registered in the root `MODULE.bazel`
 alongside `@npm_web` and `@npm_docs`, and `website/cfd/node_modules` is listed
 in `.bazelignore`.
 
+## Deploy
+
+Cloudflare Workers Builds. The dashboard supplies the root directory
+(`/website/cfd/`) and the deploy command (`npx wrangler deploy`); the build
+lives in `wrangler.toml` as a `[build]` command, so an empty dashboard build
+field cannot break the deploy.
+
+The Worker is **`deep-causality-cfd-prod`**, spelled with hyphens throughout,
+and `wrangler.toml` must carry that exact name. See
+[`../README.md`](../README.md) for the two ways this fails quietly.
+
 ## Design
 
 The binding spec is [`../web/DESIGN.md`](../web/DESIGN.md); the descriptive
@@ -63,6 +74,14 @@ project, not something this site should diverge on.
 
 From `openspec/notes/cfd-website/cfd-docs-website.md`:
 
+- **The landing page follows the crate README.** `src/pages/index.astro`
+  makes the same five arguments in the same order as
+  `deep_causality_cfd/README.md`: counterfactual dynamics, dynamic regime
+  change, dynamic multiphysics, multiple solver paradigms, provenance for
+  comparison across boundaries. Evidence follows the argument, not the other
+  way round, so validation and the worked examples come last. One component
+  per argument, under `src/components/home/`. When the crate README changes an
+  argument, this page changes with it.
 - **A toolbox for a named problem class**, with an explicit line between what
   works today and what is aspirational. That line is the `/roadmap/` page's
   three-list structure, and no item moves up a list without a committed artifact.
@@ -99,6 +118,11 @@ to 7.x.
 `@astrojs/markdown-satteri` is also pinned, in `pnpm-workspace.yaml`, because
 two resolved copies break Bazel's `public_hoist_packages`. See
 [`../README.md`](../README.md) for both constraints.
+
+`shiki` is pinned in the same file. `shiki-rust-themes.mjs` derives its themes
+from the `bundledThemes` of this project's own copy, while astro highlights with
+the copy its `^4.0.2` dependency resolves; a single override keeps those the
+same shiki.
 
 ## Deliberate omissions
 

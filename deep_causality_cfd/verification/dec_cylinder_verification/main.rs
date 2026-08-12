@@ -31,9 +31,13 @@
 //! - The **cycle-mean drag** `C_d = F_x / (½ U² D)`, averaged over the developed (second-half)
 //!   window and split into the **pressure** force (`pressure_surface_force` over the static pressure
 //!   from `pressure_diagnostic`) and the **viscous (friction)** force (`viscous_surface_force`),
-//!   with the lift `C_l` and the `C_d` swing. Reference: `C_d(Re=100) ≈ 1.24–1.33`
-//!   (Dröge–Verstappen 2005: 1.24 = 0.93 pressure + 0.31 friction; Lehmkuhl et al. 2013 lineage
-//!   ≈ 1.33), so friction is ≈ 25 % of `C_d`.
+//!   with the lift `C_l` and the `C_d` swing. Reference: `C_d(Re=100) ≈ 1.32–1.36`, the 2-D
+//!   unconfined laminar consensus (Qu et al. 2013, Posdziech & Grundmann 2007, Williamson, as
+//!   compiled in arXiv:2303.09262). The directory README's gate-result section quotes the same
+//!   band. Dröge & Verstappen (2005), Table II, is the secondary reference, for the
+//!   pressure/friction split only: their cut-cell result is `C_d = 1.24 = 0.93` pressure `+ 0.31`
+//!   friction, so friction is ≈ 25 % of `C_d`. That `1.24` is a single low-side cut-cell datum. It
+//!   is not the reference band and is no longer used as its lower edge.
 //!
 //! ## Scope
 //!
@@ -46,17 +50,10 @@
 //! cargo run --release -p deep_causality_cfd --example dec_cylinder_verification
 //! ```
 
-use std::collections::BTreeMap;
-
 use deep_causality_cfd::{
-    DecNsSolver, Inflow, Outflow, SlipWall, SolenoidalField, force_coefficient,
-    pressure_surface_force, viscous_surface_force,
+    Body, CfdConfigBuilder, CfdFlow, Inflow, Mesh, Observe, Outflow, Seed, SlipWall,
 };
-use deep_causality_tensor::CausalTensor;
-use deep_causality_topology::{
-    ChainComplex, CubicalReggeGeometry, CutCellRegistry, HodgeDecomposeOptions, LatticeCell,
-    LatticeComplex, Manifold, Primitive,
-};
+use deep_causality_topology::HodgeDecomposeOptions;
 
 // Fixed case parameters. The swept parameters (Re, resolution, domain, steps) are read from the
 // environment so the Re-ladder (D2/D3: Re 100–3900) and grid-refinement runs need no recompile —
@@ -70,11 +67,14 @@ const PERTURB_SIGMA: f64 = 0.75;
 // ── Acceptance bounds ─────────────────────────────────────────────────────────────────────────
 //
 // Evidence class: **tripwire**, not reference. The affordable default (8 cells/D) is below
-// reference-grid quality and the measured values sit *outside* the published bands — St 0.1710 vs
-// Williamson 0.164 (+4.3 %), C_d 1.345 vs the 1.24–1.33 band (+1.1 % over the top). Gating against
-// the published bands at this resolution would fail a correctly-working solver, so these bounds are
-// pinned around the measured default and detect regression only. The published values are printed
-// next to the measurement so the offset stays visible and is never read as agreement.
+// reference-grid quality. `St` sits outside the published value: 0.1710 vs Williamson 0.164,
+// +4.3 %. `C_d` lands inside the published band, 1.345 in 1.32–1.36, but for the wrong reason: the
+// split is pressure 1.173 + friction 0.172, so friction is ≈ 13 % of `C_d` against the ≈ 25 % of
+// the reference, and the total agrees by cancellation. Gating against the published bands at this
+// resolution would fail a correctly-working solver on `St` and would reward that cancellation on
+// `C_d`, so these bounds are pinned around the measured default and detect regression only. The
+// published values are printed next to the measurement so the offset stays visible and is never
+// read as agreement.
 //
 // Width is set by cross-platform floating-point sensitivity of a 1500-step nonlinear march, not by
 // measurement precision (the run is deterministic on one machine). Provisional: tighten once the
@@ -88,10 +88,13 @@ const REFERENCE_RE_D: f64 = 100.0;
 const ST_TRIPWIRE: (f64, f64) = (0.152, 0.190);
 /// Pinned drag-coefficient band (tripwire), ~±10 % around the measured 1.345.
 const CD_TRIPWIRE: (f64, f64) = (1.21, 1.48);
-/// Published references, printed beside the measurement. Williamson (1996) for `St`;
-/// Dröge & Verstappen (2005) / Lehmkuhl et al. (2013) for `C_d`.
+/// Published references, printed beside the measurement. Williamson (1996) for `St`. For `C_d`, the
+/// 2-D unconfined laminar consensus band (Qu et al. 2013, Posdziech & Grundmann 2007, Williamson, as
+/// compiled in arXiv:2303.09262); the directory README's gate-result section quotes the same band.
+/// Dröge & Verstappen (2005), Table II, is the secondary reference for the pressure/friction split
+/// only: `C_d = 1.24 = 0.93 + 0.31`, i.e. friction ≈ 25 %.
 const ST_REFERENCE: f64 = 0.164;
-const CD_REFERENCE_BAND: (f64, f64) = (1.24, 1.33);
+const CD_REFERENCE_BAND: (f64, f64) = (1.32, 1.36);
 
 /// Read an `f64` case parameter from the environment, falling back to `default`.
 fn env_f64(key: &str, default: f64) -> f64 {
@@ -138,26 +141,24 @@ fn main() {
     let ny = (ly_d / h).round() as usize;
     let nu = U * diameter / re_d;
 
-    // x: inflow (west) / outflow (east); y: far-field slip walls.
-    let lattice = LatticeComplex::<2, f64>::new([nx, ny], [false, false]);
+    // x: inflow (west) / outflow (east); y: far-field slip walls. The geometry, solver, zones,
+    // seed and observables are one `CfdConfigBuilder::march` case; the harness owns only its
+    // bespoke per-step probe and the reporting, which ride the pipeline's `run_with` hook.
     let center = [lx_d * 0.25, ly_d * 0.5];
-    let base = CubicalReggeGeometry::<2, f64>::uniform(h);
-    let disk = Primitive::<2, f64>::ball(center, radius);
-    let registry = CutCellRegistry::from_primitive(&lattice, &base, &disk)
+    let mesh = Mesh::box_domain([nx, ny])
+        .spacing(h)
+        .immersed(Body::disk(center, radius).merge_floor(merge_fraction));
+    // The registry the cut-cell census reports on: taken from the configured mesh, so it is the
+    // same primitive and merge floor the run materializes rather than a hand-built copy.
+    let registry = mesh
+        .cut_registry()
         .expect("disk intersection")
-        .with_cell_merging(merge_fraction);
+        .expect("the mesh carries an immersed body");
     let n_solid = registry
         .iter()
         .filter(|(_, c)| c.class().is_solid())
         .count();
     let n_cut = registry.iter().filter(|(_, c)| c.class().is_cut()).count();
-    // The registry is moved into the geometry; keep a copy for the surface-force diagnostics.
-    let registry_force = registry.clone();
-    let metric = base.with_cut_cells(registry);
-
-    let total: usize = (0..=2).map(|k| lattice.num_cells(k)).sum();
-    let data = CausalTensor::new(vec![0.0; total], vec![total]).unwrap();
-    let manifold = Manifold::from_cubical_with_metric(lattice, data, metric, 0);
 
     // Advective limit at the inflow speed, scaled by the CFL number.
     let dt = cfl * h / U;
@@ -176,41 +177,52 @@ fn main() {
     // The projection CG's iteration count grows with the grid, so the default 1000-iteration budget
     // starves the seed/step solves on finer grids. Scale it with the grid (env-overridable).
     let cg_max_iter = env_usize("CG_MAX_ITER", 30 * (nx + ny));
-    let solver = DecNsSolver::with_zones(&manifold, nu, dt, zones)
-        .expect("solver")
-        .with_cg_options(HodgeDecomposeOptions {
+    let ready = CfdConfigBuilder::dec_ns()
+        .viscosity(nu)
+        .time_step(dt)
+        .cg_options(HodgeDecomposeOptions {
             tolerance: cg_tol,
             max_iterations: Some(cg_max_iter),
         })
         // Warm-start the per-stage projection CG from the previous solve's potential. As the flow
         // develops the right-hand side changes little, so CG converges in a handful of iterations.
-        .with_warm_start();
+        .warm_start();
     // Default is the aperture-resolved cut-face no-slip (auto-on with Cut cells); `STAIRCASE=1`
     // flips to the staircase baseline for the comparison.
-    let solver = if staircase {
-        solver.with_staircase_noslip()
+    let solver_config = if staircase {
+        ready.staircase_noslip()
     } else {
-        solver
-    };
+        ready
+    }
+    .build()
+    .expect("solver config");
 
     // Symmetry-breaking initial condition: uniform stream `U` in x plus a single-signed transverse
     // blob one diameter behind the cylinder. The seed projection makes it divergence-free.
-    let n0 = manifold.complex().num_cells(0);
-    let mut vv = vec![0.0_f64; 2 * n0];
-    let (xb, yb) = (center[0] + 1.0, center[1]);
-    let two_sigma_sq = 2.0 * PERTURB_SIGMA * PERTURB_SIGMA;
-    for (i, v) in manifold.complex().iter_cells(0).enumerate() {
-        let p = v.position();
-        let x_d = p[0] as f64 * h / diameter;
-        let y_d = p[1] as f64 * h / diameter;
-        let r2 = (x_d - xb).powi(2) + (y_d - yb).powi(2);
-        vv[2 * i] = U;
-        vv[2 * i + 1] = PERTURB_EPS * U * (-r2 / two_sigma_sq).exp();
-    }
-    let seed = CausalTensor::new(vv, vec![2 * n0]).unwrap();
-    let mut state = solver.seed_from_vertex_vectors(&seed).expect("seed");
+    let (xb, yb) = (center[0] + diameter, center[1]);
 
-    // Wake probe: transverse (y) velocity ~1.5 D downstream of the cylinder, mid-channel.
+    // Cycle-mean drag: the reference `C_d` / `C_l` are cycle means, so the force is sampled over the
+    // developed (second-half) window and averaged. The pipeline computes the coefficients and their
+    // pressure/friction split every step; the harness averages the same developed-window instants.
+    let config = CfdConfigBuilder::march::<2, f64>("dec-cylinder")
+        .mesh(mesh)
+        .solver(solver_config)
+        .zones(zones)
+        .seed(Seed::UniformXPerturbed {
+            speed: U,
+            center: [xb, yb, 0.0],
+            sigma: PERTURB_SIGMA * diameter,
+            amplitude: PERTURB_EPS,
+        })
+        .march_for(steps)
+        .observe(Observe::default().drag(U).drag_split())
+        .build()
+        .expect("cylinder case config");
+    let manifold = config.materialize().expect("case geometry");
+
+    // Wake probe: transverse (y) velocity ~1.5 D downstream of the cylinder, mid-channel. Read as a
+    // raw edge cochain entry (the edge-indexed probe `StepView::one_form` exists for), not the
+    // interpolated `Observe::probe`, so the Strouhal signal is the one the pinned band describes.
     let probe_x = ((center[0] + 1.5 * diameter) / h).round() as usize;
     let probe_y = (center[1] / h).round() as usize;
     let probe_edge = manifold
@@ -224,7 +236,7 @@ fn main() {
         .expect("probe edge exists");
 
     eprintln!(
-        "# isolated cylinder: grid {nx}×{ny} ({cells_per_d}/D), domain {lx_d}×{ly_d} D, Re_D={re_d}, nu={nu:.3e}, dt={dt:.3e}"
+        "# isolated cylinder: grid {nx}\u{d7}{ny} ({cells_per_d}/D), domain {lx_d}\u{d7}{ly_d} D, Re_D={re_d}, nu={nu:.3e}, dt={dt:.3e}"
     );
     let noslip_mode = if staircase {
         "staircase"
@@ -241,34 +253,25 @@ fn main() {
 
     let mut probe_series: Vec<(f64, f64)> = Vec::with_capacity(steps);
     let report_every = (steps / 200).max(1);
-    // Cycle-mean drag: sample the force over the developed (second-half) window and average, since
-    // the reference C_d / C_l are cycle means, not a single instant.
     let drag_every = (steps / 80).max(1);
-    let mut drag_samples: Vec<[f64; 4]> = Vec::new();
-    for step in 0..steps {
-        // A solver error is a hard failure, not a stopping condition. The previous `break` fell
-        // through to the reporting path, which then computed St and C_d from the *truncated*
-        // series and returned 0 — so a diverged march produced plausible-looking numbers and a
-        // success exit code, contradicting the suite convention in verification/README.md.
-        let out = match solver.step(&state) {
-            Ok(o) => o,
-            Err(e) => {
-                eprintln!("[FAIL] march diverged at step {step}: {e}");
-                eprintln!(
-                    "=== dec_cylinder_verification FAILED: solver error, no results reported. ==="
-                );
-                std::process::exit(1);
-            }
-        };
-        let t = (step + 1) as f64 * dt;
-        let u = out.state().as_one_form();
+    let mut last_step = 0usize;
+
+    let report = CfdFlow::march(&config).on(&manifold).run_with(|view| {
+        let step = view.step();
+        let t = view.time();
+        let u = view.one_form();
         let v_probe = u.as_slice()[probe_edge] / h;
+        last_step = step;
         probe_series.push((t, v_probe));
-        if (step + 1) % report_every == 0 {
+        if step % report_every == 0 {
             // The global divergence residual includes the open inlet/outlet (where the boundary
-            // flux makes δu nonzero by design); the *interior* divergence is the meaningful check.
-            let codiff = manifold.codifferential_of(u.as_slice(), 1).into_vec();
-            let interior_div = manifold
+            // flux makes \u{3b4}u nonzero by design); the *interior* divergence is the meaningful check.
+            let codiff = view
+                .manifold()
+                .codifferential_of(u.as_slice(), 1)
+                .into_vec();
+            let interior_div = view
+                .manifold()
                 .complex()
                 .iter_cells(0)
                 .enumerate()
@@ -280,29 +283,42 @@ fn main() {
                 .fold(0.0_f64, f64::max);
             println!(
                 "{},{:.4},{:.5e},{:.2e},{:.6e}",
-                step + 1,
+                step,
                 t,
-                out.max_speed(),
+                view.max_speed().expect("max speed"),
                 interior_div,
                 v_probe,
             );
         }
-        if step + 1 > steps / 2
-            && (step + 1) % drag_every == 0
-            && let Some(s) = instantaneous_drag(
-                &solver,
-                &manifold,
-                &registry_force,
-                out.state(),
-                nu,
-                U,
-                diameter,
-            )
-        {
-            drag_samples.push(s);
+    });
+
+    // A solver error is a hard failure, not a stopping condition: reporting St and C_d from a
+    // truncated series would produce plausible-looking numbers and a success exit code.
+    let report = match report {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[FAIL] march diverged after step {last_step}: {e}");
+            eprintln!(
+                "=== dec_cylinder_verification FAILED: solver error, no results reported. ==="
+            );
+            std::process::exit(1);
         }
-        state = out.into_state();
-    }
+    };
+
+    // The observed series carry the seed at index 0 and step `k` at index `k`, so the developed
+    // window is exactly the instants the hand-rolled loop sampled.
+    let series = |name: &str| {
+        report
+            .series(name)
+            .unwrap_or_else(|| panic!("the {name} series was observed"))
+            .to_vec()
+    };
+    let (cd_series, cl_series) = (series("drag"), series("lift"));
+    let (cdp_series, cdf_series) = (series("drag_pressure"), series("drag_friction"));
+    let drag_samples: Vec<[f64; 4]> = (1..=steps)
+        .filter(|k| *k > steps / 2 && k % drag_every == 0)
+        .map(|k| [cd_series[k], cl_series[k], cdp_series[k], cdf_series[k]])
+        .collect();
 
     let st = report_strouhal(&probe_series, diameter, U);
     let cd = report_drag_mean(&drag_samples);
@@ -367,8 +383,8 @@ fn verify(st: Option<f64>, cd: Option<f64>, re_d: f64, cells_per_d: usize) -> bo
     if let Some(v) = cd {
         let pass = v > CD_TRIPWIRE.0 && v < CD_TRIPWIRE.1;
         println!(
-            "  [{}] [tripwire] C_d {v:.3} in [{}, {}]  (reference band: Dröge–Verstappen / \
-             Lehmkuhl {:.2}–{:.2}, measured is {:+.1} % relative to the band top)",
+            "  [{}] [tripwire] C_d {v:.3} in [{}, {}]  (reference band: 2-D laminar consensus \
+             {:.2}–{:.2}, measured is {:+.1} % relative to the band top)",
             if pass { "PASS" } else { "FAIL" },
             CD_TRIPWIRE.0,
             CD_TRIPWIRE.1,
@@ -440,63 +456,4 @@ fn report_strouhal(series: &[(f64, f64)], diameter: f64, u_ref: f64) -> Option<f
         "# shedding: period {period:.4}, St = f·D/U ≈ {st:.4}  (Williamson Re=100 ≈ {ST_REFERENCE})"
     );
     Some(st)
-}
-
-/// Instantaneous drag/lift coefficients at one state: `[C_d, C_l, C_d_pressure, C_d_friction]`.
-/// The pressure force comes from the recovered static pressure, the friction from the viscous
-/// surface traction. Returns `None` if a diagnostic solve fails. One CG solve (pressure) per call.
-fn instantaneous_drag(
-    solver: &DecNsSolver<'_, 2, f64>,
-    manifold: &Manifold<LatticeComplex<2, f64>, f64>,
-    registry: &CutCellRegistry<2, f64>,
-    state: &SolenoidalField<f64>,
-    nu: f64,
-    u_ref: f64,
-    diameter: f64,
-) -> Option<[f64; 4]> {
-    // Static pressure 0-form at this state (one CG solve), keyed by vertex position.
-    let (_bernoulli, static_p) = match solver.pressure_diagnostic(state) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("# drag: pressure diagnostic failed: {e}");
-            return None;
-        }
-    };
-    let p_vert = static_p.as_tensor().as_slice();
-    let vertex_index: BTreeMap<[usize; 2], usize> = manifold
-        .complex()
-        .iter_cells(0)
-        .enumerate()
-        .map(|(i, v)| (*v.position(), i))
-        .collect();
-
-    // Per-cell pressure = mean of the cell's corner vertices (the `iter_cells(2)` / CellId order).
-    let cell_pressure: Vec<f64> = manifold
-        .complex()
-        .iter_cells(2)
-        .map(|cell: LatticeCell<2>| {
-            let corners = cell.vertices();
-            let sum: f64 = corners
-                .iter()
-                .filter_map(|pos| vertex_index.get(pos).map(|&i| p_vert[i]))
-                .sum();
-            sum / corners.len() as f64
-        })
-        .collect();
-
-    let f_pressure = pressure_surface_force(registry, |id| cell_pressure[id]);
-    let f_viscous = match viscous_surface_force(manifold, registry, state.as_one_form(), nu) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("# drag: viscous force failed: {e}");
-            return None;
-        }
-    };
-    let f_total = [f_pressure[0] + f_viscous[0], f_pressure[1] + f_viscous[1]];
-
-    let cd = force_coefficient(f_total[0], u_ref, diameter);
-    let cl = force_coefficient(f_total[1], u_ref, diameter);
-    let cd_p = force_coefficient(f_pressure[0], u_ref, diameter);
-    let cd_f = force_coefficient(f_viscous[0], u_ref, diameter);
-    Some([cd, cl, cd_p, cd_f])
 }
